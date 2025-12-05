@@ -407,36 +407,47 @@ function startFrontend() {
   });
 }
 
-// 清理进程
+// 清理进程 - 使用进程名确保彻底清理
 function cleanup() {
   console.log('Cleaning up processes...');
   
-  if (backendProcess) {
+  if (process.platform === 'win32') {
+    // Windows: 使用 taskkill 按进程名杀死
     try {
-      // Windows 下需要杀死整个进程树
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', backendProcess.pid, '/f', '/t'], { shell: true });
-      } else {
-        backendProcess.kill('SIGTERM');
-      }
+      // 杀死后端进程
+      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
     } catch (e) {
-      console.error('Error killing backend:', e);
+      // 进程可能不存在，忽略错误
     }
-    backendProcess = null;
+    
+    // 注意：不要杀死所有 node.exe，只杀死我们启动的前端进程
+    if (frontendProcess && frontendProcess.pid) {
+      try {
+        require('child_process').execSync(`taskkill /F /PID ${frontendProcess.pid} /T`, { stdio: 'ignore' });
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+  } else {
+    // 非 Windows
+    if (backendProcess) {
+      try {
+        backendProcess.kill('SIGTERM');
+      } catch (e) {
+        console.error('Error killing backend:', e);
+      }
+    }
+    if (frontendProcess) {
+      try {
+        frontendProcess.kill('SIGTERM');
+      } catch (e) {
+        console.error('Error killing frontend:', e);
+      }
+    }
   }
   
-  if (frontendProcess) {
-    try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', frontendProcess.pid, '/f', '/t'], { shell: true });
-      } else {
-        frontendProcess.kill('SIGTERM');
-      }
-    } catch (e) {
-      console.error('Error killing frontend:', e);
-    }
-    frontendProcess = null;
-  }
+  backendProcess = null;
+  frontendProcess = null;
 }
 
 // 应用启动

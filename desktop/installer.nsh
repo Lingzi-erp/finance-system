@@ -1,10 +1,20 @@
-; 自定义 NSIS 脚本 - 确保卸载前关闭应用
+; 自定义 NSIS 脚本
 
+; 安装前关闭正在运行的应用
+!macro customInstall
+  ; 尝试关闭正在运行的应用程序
+  nsExec::ExecToLog 'taskkill /F /IM "财务管理系统.exe" /T'
+  nsExec::ExecToLog 'taskkill /F /IM "backend.exe" /T'
+  
+  ; 等待进程完全退出
+  Sleep 2000
+!macroend
+
+; 卸载前关闭应用并清理
 !macro customUnInstall
   ; 关闭正在运行的应用程序
   nsExec::ExecToLog 'taskkill /F /IM "财务管理系统.exe" /T'
   nsExec::ExecToLog 'taskkill /F /IM "backend.exe" /T'
-  nsExec::ExecToLog 'taskkill /F /IM "node.exe" /T'
   
   ; 等待进程完全退出
   Sleep 2000
@@ -21,4 +31,3 @@
     
   done:
 !macroend
-

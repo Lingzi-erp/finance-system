@@ -22,9 +22,10 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const BUILD_DATE = '2024-12-06';
 const CHANGELOG = [
+  { version: '1.0.4', date: '2024-12-06', changes: ['修复关闭窗口后进程残留问题', '优化更新安装流程'] },
   { version: '1.0.3', date: '2024-12-06', changes: ['简化数据中心页面布局'] },
   { version: '1.0.2', date: '2024-12-06', changes: ['新增系统信息和版本显示', '新增手动检查更新按钮', '新增更新日志展示', '修复备份文件被打包的问题'] },
   { version: '1.0.1', date: '2024-12-06', changes: ['修复卸载不完整的问题', '优化项目结构', '清理不必要的文件'] },
