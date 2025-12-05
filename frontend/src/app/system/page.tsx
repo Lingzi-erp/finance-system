@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Settings, Database, Trash2, 
-  PackageOpen, AlertTriangle, CheckCircle, Loader2 
+  PackageOpen, AlertTriangle, CheckCircle, Loader2,
+  Info, RefreshCw, Download, Monitor, HardDrive, Cpu
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -20,10 +21,53 @@ function getAuthHeaders() {
   };
 }
 
+// 版本信息
+const APP_VERSION = '1.0.2';
+const BUILD_DATE = '2024-12-06';
+const CHANGELOG = [
+  { version: '1.0.2', date: '2024-12-06', changes: ['新增系统信息和版本显示', '新增手动检查更新按钮', '新增更新日志展示', '修复备份文件被打包的问题'] },
+  { version: '1.0.1', date: '2024-12-06', changes: ['修复卸载不完整的问题', '优化项目结构', '清理不必要的文件'] },
+  { version: '1.0.0', date: '2024-12-06', changes: ['首个正式版本发布', '完整的商品、订单、库存、财务功能', '支持自动更新'] },
+];
+
 export default function SystemPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+
+  // 检查更新
+  const checkForUpdates = async () => {
+    setCheckingUpdate(true);
+    setUpdateStatus(null);
+    
+    try {
+      // 调用 Electron API 检查更新
+      if (typeof window !== 'undefined' && (window as any).electronAPI?.checkForUpdates) {
+        (window as any).electronAPI.checkForUpdates();
+        setUpdateStatus('正在检查更新...');
+        
+        // 监听更新事件
+        setTimeout(() => {
+          setCheckingUpdate(false);
+          if (updateStatus === '正在检查更新...') {
+            setUpdateStatus('当前已是最新版本');
+          }
+        }, 5000);
+      } else {
+        // 非 Electron 环境，显示提示
+        toast({
+          title: '检查更新',
+          description: '请在桌面应用中使用此功能',
+        });
+        setCheckingUpdate(false);
+      }
+    } catch (err) {
+      setUpdateStatus('检查更新失败');
+      setCheckingUpdate(false);
+    }
+  };
 
   const executeAction = async (
     action: string, 
@@ -178,6 +222,103 @@ export default function SystemPage() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5" />
               <p><strong>数据安全：</strong>建议定期在「数据备份」中备份数据，以便需要时恢复</p>
             </div>
+          </div>
+        </div>
+
+        {/* 系统信息与版本 */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Info className="w-5 h-5 text-indigo-600" />
+            系统信息
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* 版本信息 */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm text-slate-600">当前版本</span>
+                </div>
+                <span className="font-mono font-semibold text-indigo-600">v{APP_VERSION}</span>
+              </div>
+              
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm text-slate-600">构建日期</span>
+                </div>
+                <span className="font-mono text-slate-700">{BUILD_DATE}</span>
+              </div>
+              
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm text-slate-600">运行环境</span>
+                </div>
+                <span className="text-sm text-slate-700">Windows x64</span>
+              </div>
+            </div>
+            
+            {/* 检查更新 */}
+            <div className="flex flex-col justify-between">
+              <div className="text-center p-4 bg-gradient-to-br from-indigo-50 to-blue-50 rounded-lg">
+                <Download className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
+                <p className="text-sm text-slate-600 mb-3">检查是否有新版本可用</p>
+                <Button
+                  onClick={checkForUpdates}
+                  disabled={checkingUpdate}
+                  className="bg-indigo-500 hover:bg-indigo-600"
+                >
+                  {checkingUpdate ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      检查中...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      检查更新
+                    </>
+                  )}
+                </Button>
+                {updateStatus && (
+                  <p className="text-xs text-slate-500 mt-2">{updateStatus}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 更新日志 */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <RefreshCw className="w-5 h-5 text-indigo-600" />
+            更新日志
+          </h3>
+          
+          <div className="space-y-4">
+            {CHANGELOG.map((release, idx) => (
+              <div key={release.version} className={`border-l-2 pl-4 ${idx === 0 ? 'border-indigo-500' : 'border-slate-200'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`font-mono font-semibold ${idx === 0 ? 'text-indigo-600' : 'text-slate-700'}`}>
+                    v{release.version}
+                  </span>
+                  {idx === 0 && (
+                    <span className="text-xs bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full">最新</span>
+                  )}
+                  <span className="text-xs text-slate-400">{release.date}</span>
+                </div>
+                <ul className="text-sm text-slate-600 space-y-1">
+                  {release.changes.map((change, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <CheckCircle className="w-3 h-3 text-green-500" />
+                      {change}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </div>
       </div>

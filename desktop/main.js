@@ -39,6 +39,10 @@ function setupAutoUpdater() {
   // 没有可用更新
   autoUpdater.on('update-not-available', (info) => {
     console.log('当前已是最新版本');
+    // 发送给渲染进程
+    if (mainWindow) {
+      mainWindow.webContents.send('update-not-available');
+    }
   });
 
   // 更新下载进度
@@ -92,14 +96,44 @@ function formatBytes(bytes) {
 }
 
 // 检查更新
-function checkForUpdates() {
+function checkForUpdates(isManual = false) {
   if (!isDev) {
     console.log('检查更新...');
-    autoUpdater.checkForUpdates().catch(err => {
+    autoUpdater.checkForUpdates().then(result => {
+      // 如果是手动检查且没有更新，显示提示
+      if (isManual && !result.updateInfo) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '检查更新',
+          message: '当前已是最新版本',
+          detail: `当前版本: v${app.getVersion()}`,
+          buttons: ['确定']
+        });
+      }
+    }).catch(err => {
       console.log('检查更新失败:', err.message);
+      if (isManual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'error',
+          title: '检查更新失败',
+          message: '无法连接到更新服务器',
+          detail: err.message,
+          buttons: ['确定']
+        });
+      }
     });
   }
 }
+
+// IPC 事件处理 - 手动检查更新
+ipcMain.on('check-for-updates', () => {
+  checkForUpdates(true);
+});
+
+// IPC 事件处理 - 安装更新
+ipcMain.on('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
 // ==================== 自动更新配置结束 ====================
 
 let mainWindow = null;

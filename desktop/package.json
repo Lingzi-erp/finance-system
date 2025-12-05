@@ -1,6 +1,6 @@
 {
   "name": "finance-system",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "财务管理系统",
   "main": "main.js",
   "author": "财务系统",
@@ -42,7 +42,10 @@
         "from": "../backend-dist",
         "to": "backend",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/*.db",
+          "!**/backups/**",
+          "!**/logs/**"
         ]
       },
       {
