@@ -450,6 +450,89 @@ function cleanup() {
   frontendProcess = null;
 }
 
+// 检查端口是否被占用
+function checkPort(port) {
+  return new Promise((resolve) => {
+    const server = require('net').createServer();
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(true); // 端口被占用
+      } else {
+        resolve(false);
+      }
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(false); // 端口可用
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+// 清理占用端口的旧进程
+async function cleanupOldProcesses() {
+  console.log('检查端口占用情况...');
+  
+  const port8000InUse = await checkPort(8000);
+  const port3000InUse = await checkPort(3000);
+  
+  if (port8000InUse || port3000InUse) {
+    console.log(`端口被占用: 8000=${port8000InUse}, 3000=${port3000InUse}`);
+    console.log('尝试清理旧进程...');
+    
+    try {
+      // 杀死可能残留的后端进程
+      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
+    } catch (e) {
+      // 忽略错误
+    }
+    
+    // 等待进程完全退出
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // 再次检查
+    const stillInUse8000 = await checkPort(8000);
+    const stillInUse3000 = await checkPort(3000);
+    
+    if (stillInUse8000 || stillInUse3000) {
+      // 如果仍然被占用，可能是其他程序
+      const msg = [];
+      if (stillInUse8000) msg.push('8000');
+      if (stillInUse3000) msg.push('3000');
+      
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: '端口被占用',
+        message: `端口 ${msg.join(' 和 ')} 被其他程序占用`,
+        detail: '这可能是因为：\n1. 上次程序没有正常关闭\n2. 有其他程序正在使用这些端口\n\n点击"强制清理"尝试释放端口，或"退出"手动处理。',
+        buttons: ['强制清理', '退出'],
+        defaultId: 0,
+        cancelId: 1
+      });
+      
+      if (result.response === 0) {
+        // 强制清理 - 杀掉占用这些端口的进程
+        try {
+          if (stillInUse8000) {
+            require('child_process').execSync('FOR /F "tokens=5" %P IN (\'netstat -ano ^| findstr :8000 ^| findstr LISTENING\') DO taskkill /F /PID %P', { shell: 'cmd.exe', stdio: 'ignore' });
+          }
+          if (stillInUse3000) {
+            require('child_process').execSync('FOR /F "tokens=5" %P IN (\'netstat -ano ^| findstr :3000 ^| findstr LISTENING\') DO taskkill /F /PID %P', { shell: 'cmd.exe', stdio: 'ignore' });
+          }
+        } catch (e) {
+          console.log('强制清理失败:', e.message);
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else {
+        return false; // 用户选择退出
+      }
+    }
+  }
+  
+  console.log('端口检查完成，可以启动服务');
+  return true;
+}
+
 // 应用启动
 app.whenReady().then(async () => {
   console.log('App is ready, starting...');
@@ -457,6 +540,15 @@ app.whenReady().then(async () => {
   console.log('Resources path:', isDev ? 'N/A' : process.resourcesPath);
   
   createSplashWindow();
+  
+  // 先检查并清理端口
+  const canStart = await cleanupOldProcesses();
+  if (!canStart) {
+    if (splashWindow) splashWindow.close();
+    app.quit();
+    return;
+  }
+  
   createMainWindow();
 
   try {
