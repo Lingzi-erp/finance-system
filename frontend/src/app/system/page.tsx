@@ -22,9 +22,10 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const BUILD_DATE = '2024-12-06';
 const CHANGELOG = [
+  { version: '1.0.6', date: '2024-12-06', changes: ['更新日志默认只显示最新版本', '优化更新日志展示体验'] },
   { version: '1.0.5', date: '2024-12-06', changes: ['修复更新时误弹用户数据确认框的问题'] },
   { version: '1.0.4', date: '2024-12-06', changes: ['修复关闭窗口后进程残留问题', '优化更新安装流程'] },
   { version: '1.0.3', date: '2024-12-06', changes: ['简化数据中心页面布局'] },
@@ -39,6 +40,7 @@ export default function SystemPage() {
   const [loading, setLoading] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [showAllChangelog, setShowAllChangelog] = useState(false);
 
   // 检查更新
   const checkForUpdates = async () => {
@@ -295,13 +297,31 @@ export default function SystemPage() {
 
         {/* 更新日志 */}
         <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <RefreshCw className="w-5 h-5 text-indigo-600" />
-            更新日志
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-indigo-600" />
+              更新日志
+            </h3>
+            {!showAllChangelog && CHANGELOG.length > 1 && (
+              <button
+                onClick={() => setShowAllChangelog(true)}
+                className="text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+              >
+                查看全部 ({CHANGELOG.length})
+              </button>
+            )}
+            {showAllChangelog && (
+              <button
+                onClick={() => setShowAllChangelog(false)}
+                className="text-sm text-slate-500 hover:text-slate-600 hover:underline"
+              >
+                收起
+              </button>
+            )}
+          </div>
           
           <div className="space-y-4">
-            {CHANGELOG.map((release, idx) => (
+            {(showAllChangelog ? CHANGELOG : CHANGELOG.slice(0, 1)).map((release, idx) => (
               <div key={release.version} className={`border-l-2 pl-4 ${idx === 0 ? 'border-indigo-500' : 'border-slate-200'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`font-mono font-semibold ${idx === 0 ? 'text-indigo-600' : 'text-slate-700'}`}>
