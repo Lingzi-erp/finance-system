@@ -3,9 +3,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { 
-  BarChart3, History, TrendingUp, TrendingDown, Users, Package,
-  Receipt, Clock, AlertTriangle, Boxes, ChevronRight, Sparkles,
-  PieChart, Activity, Target, Zap
+  BarChart3, History, TrendingUp,
+  Receipt, ChevronRight
 } from 'lucide-react';
 
 /**
@@ -71,14 +70,6 @@ const dataModules = [
       },
     ]
   }
-];
-
-// 规划中的模块 - 展示未来路线图
-const plannedModules = [
-  { title: '经营仪表盘', description: '核心指标一目了然', icon: Activity },
-  { title: '利润分析', description: '毛利率、净利率追踪', icon: Target },
-  { title: '库存预警', description: '低库存、滞销预警', icon: AlertTriangle },
-  { title: '客商画像', description: '客户/供应商深度分析', icon: Users },
 ];
 
 export default function DataCenterPage() {
@@ -150,51 +141,6 @@ export default function DataCenterPage() {
           ))}
         </div>
 
-        {/* 规划中的功能 */}
-        <section className="mt-12">
-          <div className="flex items-center gap-3 mb-5">
-            <div className="w-1 h-6 bg-gradient-to-b from-slate-300 to-slate-400 rounded-full" />
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" />
-              <h2 className="text-lg font-bold text-slate-800">规划中</h2>
-              <span className="text-sm text-slate-400">Coming Soon</span>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {plannedModules.map((module) => {
-              const Icon = module.icon;
-              return (
-                <div
-                  key={module.title}
-                  className="bg-slate-50 rounded-xl border border-dashed border-slate-200 p-5 opacity-60"
-                >
-                  <div className="w-10 h-10 bg-slate-200 rounded-lg flex items-center justify-center mb-3">
-                    <Icon className="w-5 h-5 text-slate-400" />
-                  </div>
-                  <h3 className="text-sm font-medium text-slate-600 mb-1">{module.title}</h3>
-                  <p className="text-xs text-slate-400">{module.description}</p>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* 模块化说明 */}
-        <div className="mt-10 p-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-100 rounded-2xl">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
-              <Zap className="w-5 h-5 text-amber-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-amber-800 mb-1">模块化架构</h3>
-              <p className="text-sm text-amber-700 leading-relaxed">
-                数据中心采用插件式设计，每个分析模块独立开发、独立部署。
-                您可以根据实际需求启用或禁用特定模块，也可以自定义开发新的分析功能。
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
