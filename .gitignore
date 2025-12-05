@@ -1,54 +1,96 @@
-# Node.js
+# ==================== Node.js ====================
 node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# Next.js
+# ==================== Next.js ====================
 frontend/.next/
 frontend/out/
+frontend/.turbo/
 
-# Python
+# ==================== Python ====================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-backend/build/
-backend/dist/
 *.egg-info/
 .eggs/
 *.egg
 venv/
 .venv/
+env/
+.env/
 
-# PyInstaller
+# ==================== 打包输出（不上传） ====================
+# 后端打包
+backend/build/
+backend/dist/
+backend-dist/
 *.spec
 
-# 打包输出（太大，不上传）
-backend-dist/
+# 前端打包
+frontend/.next/
+
+# Electron 打包
 desktop/dist/
 desktop/resources/backend/
 desktop/resources/frontend/
 desktop/resources/node/
+
+# 便携版 Node.js
 node-portable/
 
-# 数据库和日志
+# ==================== 数据库和日志 ====================
 *.db
-*.log
+*.db-journal
+*.sqlite
+*.sqlite3
 backend/logs/
 backend/backups/
+logs/
 
-# IDE
+# ==================== IDE 和编辑器 ====================
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-*
+.project
+.classpath
+.settings/
 
-# 系统文件
+# ==================== 系统文件 ====================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# 环境变量
+# ==================== 环境变量 ====================
 .env
 .env.local
-.env.production
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
 
+# ==================== 临时文件 ====================
+*.tmp
+*.temp
+*.bak
+*.backup
+~$*
+
+# ==================== 测试和调试 ====================
+coverage/
+.nyc_output/
+*.lcov
+
+# ==================== MCP/Playwright ====================
+.playwright-mcp/

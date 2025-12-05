@@ -92,7 +92,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "财务管理系统"
+      "shortcutName": "财务管理系统",
+      "deleteAppDataOnUninstall": true,
+      "uninstallDisplayName": "财务管理系统",
+      "include": "installer.nsh"
     },
     "publish": {
       "provider": "github",
