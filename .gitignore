@@ -94,3 +94,7 @@ coverage/
 
 # ==================== MCP/Playwright ====================
 .playwright-mcp/
+
+# 开发工具（不公开）
+发布.ps1
+发布更新指南.md
