@@ -1,0 +1,104 @@
+{
+  "name": "finance-system",
+  "version": "1.0.0",
+  "description": "财务管理系统",
+  "main": "main.js",
+  "author": "财务系统",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.finance.system",
+    "productName": "财务管理系统",
+    "copyright": "Copyright © 2024",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "backend/**/*",
+      "frontend/**/*",
+      "!frontend/node_modules",
+      "!backend/__pycache__",
+      "!backend/**/*.pyc"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend-dist",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../frontend/.next/standalone",
+        "to": "frontend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../frontend/.next/static",
+        "to": "frontend/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../frontend/public",
+        "to": "frontend/public",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../node-portable",
+        "to": "node",
+        "filter": [
+          "node.exe",
+          "LICENSE"
+        ]
+      }
+    ],
+    "asar": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "财务管理系统"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Lingzi-erp",
+      "repo": "finance-system",
+      "releaseType": "release"
+    }
+  }
+}
