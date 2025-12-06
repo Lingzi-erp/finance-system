@@ -200,7 +200,7 @@ export default function BatchesPage() {
         warehouse_id: parseInt(newBatch.warehouse_id),
         supplier_id: newBatch.supplier_id ? parseInt(newBatch.supplier_id) : undefined,
         gross_weight: newBatch.gross_weight ? parseFloat(newBatch.gross_weight) : undefined,
-        deduction_formula_id: newBatch.deduction_formula_id ? parseInt(newBatch.deduction_formula_id) : undefined,
+        deduction_formula_id: newBatch.deduction_formula_id && newBatch.deduction_formula_id !== 'none' ? parseInt(newBatch.deduction_formula_id) : undefined,
         initial_quantity: parseFloat(newBatch.initial_quantity),
         purchase_price: newBatch.purchase_price ? parseFloat(newBatch.purchase_price) : undefined,
         freight_cost: newBatch.freight_cost ? parseFloat(newBatch.freight_cost) : undefined,
@@ -726,7 +726,7 @@ export default function BatchesPage() {
                         <SelectValue placeholder="选择公式" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">无扣重</SelectItem>
+                        <SelectItem value="none">无扣重</SelectItem>
                         {formulas.map((f) => (
                           <SelectItem key={f.id} value={f.id.toString()}>
                             {f.name} {f.description ? `(${f.description})` : ''}

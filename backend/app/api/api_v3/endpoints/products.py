@@ -10,6 +10,8 @@ from app.core.deps import get_db
 from app.models.v3.product import Product
 from app.models.v3.product_spec import ProductSpec
 from app.models.v3.unit import CompositeUnit, Unit
+from app.models.v3.order_item import OrderItem
+from app.models.v3.stock import Stock, StockFlow
 from app.schemas.v3.product import (
     ProductCreate, ProductUpdate, ProductResponse, ProductListResponse
 )
@@ -339,9 +341,6 @@ async def delete_product(
     product_id: int,
 ) -> Any:
     """删除商品"""
-    from app.models.v3.order_item import OrderItem
-    from app.models.v3.stock import Stock, StockFlow
-    
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="商品不存在")

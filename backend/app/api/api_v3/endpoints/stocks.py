@@ -14,6 +14,7 @@ from app.models.v3.entity import Entity
 from app.models.v3.product import Product
 from app.models.v3.business_order import BusinessOrder
 from app.models.v3.order_item import OrderItem
+from app.models.v3.unit import CompositeUnit, Unit
 from app.schemas.v3.stock import (
     StockResponse, StockListResponse, StockUpdate, StockAdjust,
     StockFlowResponse, StockFlowListResponse,
@@ -129,8 +130,6 @@ async def list_stocks(
     include_zero: bool = Query(False, description="是否包含库存为0的记录"),
     search: Optional[str] = Query(None, description="搜索商品名称/编码")) -> Any:
     """获取库存列表"""
-    from app.models.v3.unit import CompositeUnit, Unit
-    
     # 如果有搜索条件，需要join Product表
     if search:
         query = (

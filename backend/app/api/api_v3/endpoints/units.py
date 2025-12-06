@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
 from app.models.v3.unit import UnitGroup, Unit, CompositeUnit
+from app.models.v3.product import Product
 from app.schemas.v3.unit import (
     UnitGroupCreate, UnitGroupUpdate, UnitGroupResponse, UnitGroupListResponse,
     UnitCreate, UnitUpdate, UnitResponse,
@@ -366,8 +367,6 @@ async def delete_composite_unit(
     db: AsyncSession = Depends(get_db),
     cu_id: int) -> Any:
     """删除复式单位"""
-    from app.models.v3.product import Product
-    
     cu = await db.get(CompositeUnit, cu_id)
     if not cu:
         raise HTTPException(status_code=404, detail="复式单位不存在")

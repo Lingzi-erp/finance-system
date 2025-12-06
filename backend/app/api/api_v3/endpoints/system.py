@@ -25,6 +25,7 @@ from app.models.v3.deduction_formula import DeductionFormula
 from app.models.v3.unit import UnitGroup, Unit, CompositeUnit
 from app.models.v3.product_spec import ProductSpec
 from app.models.v3.specification import Specification
+from app.models.v3.order_item_batch import OrderItemBatch
 
 router = APIRouter()
 
@@ -326,7 +327,6 @@ async def init_demo_data(
         await db.flush()
         
         # 创建批次出库记录（用于批次追溯）
-        from app.models.v3.order_item_batch import OrderItemBatch
         oib1 = OrderItemBatch(
             order_item_id=soi1.id,
             batch_id=batch1.id,

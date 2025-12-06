@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
 from app.models.v3.payment_method import PaymentMethod
+from app.models.v3.payment_record import PaymentRecord
 from app.models.v3.entity import Entity
 from app.schemas.v3.payment_method import (
     PaymentMethodCreate,
@@ -224,7 +225,6 @@ async def delete_payment_method(
         raise HTTPException(status_code=404, detail="收付款方式不存在")
     
     # 检查是否有关联的收付款记录
-    from app.models.v3.payment_record import PaymentRecord
     count_query = select(func.count()).where(PaymentRecord.payment_method_id == method_id)
     count = (await db.execute(count_query)).scalar_one()
     if count > 0:

@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import get_db
 from app.models.v3.specification import Specification
 from app.models.v3.category import Category
+from app.models.v3.product import Product
 from app.schemas.v3.specification import (
     SpecificationCreate, SpecificationUpdate, 
     SpecificationResponse, SpecificationListResponse
@@ -174,8 +175,6 @@ async def delete_specification(
     db: AsyncSession = Depends(get_db),
     spec_id: int) -> Any:
     """删除规格"""
-    from app.models.v3.product import Product
-    
     spec = await db.get(Specification, spec_id)
     if not spec:
         raise HTTPException(status_code=404, detail="规格不存在")

@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.models.v3.entity import Entity
+from app.models.v3.business_order import BusinessOrder
+from app.models.v3.stock import Stock, StockFlow
 from app.schemas.v3.entity import (
     EntityCreate, EntityUpdate, EntityResponse, EntityListResponse
 )
@@ -164,9 +166,6 @@ async def delete_entity(
     entity_id: int,
 ) -> Any:
     """删除实体"""
-    from app.models.v3.business_order import BusinessOrder
-    from app.models.v3.stock import Stock, StockFlow
-    
     entity = await db.get(Entity, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail="实体不存在")

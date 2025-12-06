@@ -10,9 +10,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import inspect
 
 from app.core.deps import get_db
-    require_order_view, require_order_create,
-    require_order_edit, require_order_delete, require_permission
-)
+from app.models.v3.stock import Stock, StockFlow
+from app.models.v3.payment_record import PaymentRecord
 from app.models.v3.business_order import BusinessOrder
 from app.models.v3.order_item import OrderItem
 from app.models.v3.order_flow import OrderFlow
@@ -1095,9 +1094,6 @@ async def delete_order(
     db: AsyncSession = Depends(get_db),
     order_id: int) -> Any:
     """删除业务单（仅草稿状态可删除，管理员可删除任何状态但会回滚库存和账款）- 需要 order.delete 权限"""
-    from app.models.v3.stock import Stock, StockFlow
-    from app.models.v3.payment_record import PaymentRecord
-    
     # 加载订单及关联
     result = await db.execute(
         _base_order_query().where(BusinessOrder.id == order_id)
