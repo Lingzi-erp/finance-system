@@ -344,12 +344,26 @@ function checkService(port, callback, maxRetries = 60) {
 
 // 启动后端服务
 function startBackend() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const dataDir = ensureDataDir();
     const dbPath = path.join(dataDir, 'finance_system.db');
     
     console.log('Data directory:', dataDir);
     console.log('Database path:', dbPath);
+    
+    // 【关键】启动前再次确认端口是空闲的
+    const portInUse = await checkPort(8000);
+    if (portInUse) {
+      console.log('端口 8000 仍被占用，尝试强制清理...');
+      killPortProcess(8000);
+      await new Promise(r => setTimeout(r, 1500));
+      
+      const stillInUse = await checkPort(8000);
+      if (stillInUse) {
+        reject(new Error('端口 8000 被占用且无法释放，请手动关闭占用程序'));
+        return;
+      }
+    }
     
     if (isDev) {
       // 开发模式：使用 Python 直接运行
@@ -385,6 +399,17 @@ function startBackend() {
         shell: true
       });
     }
+    
+    // 监听进程退出（可能是启动失败）
+    let processExited = false;
+    backendProcess.on('exit', (code) => {
+      if (!processExited) {
+        processExited = true;
+        if (code !== 0 && code !== null) {
+          console.error(`Backend process exited with code ${code}`);
+        }
+      }
+    });
 
     backendProcess.stdout?.on('data', (data) => {
       console.log(`Backend: ${data}`);
@@ -402,9 +427,12 @@ function startBackend() {
     // 检查后端是否启动成功
     console.log('Waiting for backend to start on port 8000...');
     checkService(8000, (success) => {
-      if (success) {
-        console.log('Backend started successfully');
+      // 【关键】确认是我们启动的进程在响应，而不是残留进程
+      if (success && backendProcess && !processExited) {
+        console.log('Backend started successfully, PID:', backendProcess.pid);
         resolve();
+      } else if (processExited) {
+        reject(new Error('Backend process exited unexpectedly'));
       } else {
         reject(new Error('Backend failed to start within timeout'));
       }
@@ -414,7 +442,7 @@ function startBackend() {
 
 // 启动前端服务
 function startFrontend() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (isDev) {
       // 开发模式：检查前端是否已经在运行
       console.log('Checking if frontend is running in dev mode...');
@@ -427,6 +455,20 @@ function startFrontend() {
         }
       }, 5);
     } else {
+      // 【关键】启动前再次确认端口是空闲的
+      const portInUse = await checkPort(3000);
+      if (portInUse) {
+        console.log('端口 3000 仍被占用，尝试强制清理...');
+        killPortProcess(3000);
+        await new Promise(r => setTimeout(r, 1500));
+        
+        const stillInUse = await checkPort(3000);
+        if (stillInUse) {
+          reject(new Error('端口 3000 被占用且无法释放，请手动关闭占用程序'));
+          return;
+        }
+      }
+      
       // 生产模式：运行 Next.js standalone 服务器
       const frontendDir = getResourcePath('frontend');
       const serverJs = path.join(frontendDir, 'server.js');
@@ -456,6 +498,17 @@ function startFrontend() {
           HOSTNAME: '127.0.0.1'
         }
       });
+      
+      // 监听进程退出（可能是启动失败）
+      let processExited = false;
+      frontendProcess.on('exit', (code) => {
+        if (!processExited) {
+          processExited = true;
+          if (code !== 0 && code !== null) {
+            console.error(`Frontend process exited with code ${code}`);
+          }
+        }
+      });
 
       frontendProcess.stdout?.on('data', (data) => {
         console.log(`Frontend: ${data}`);
@@ -472,9 +525,12 @@ function startFrontend() {
 
       console.log('Waiting for frontend to start on port 3000...');
       checkService(3000, (success) => {
-        if (success) {
-          console.log('Frontend started successfully');
+        // 【关键】确认是我们启动的进程在响应
+        if (success && frontendProcess && !processExited) {
+          console.log('Frontend started successfully, PID:', frontendProcess.pid);
           resolve();
+        } else if (processExited) {
+          reject(new Error('Frontend process exited unexpectedly'));
         } else {
           reject(new Error('Frontend failed to start within timeout'));
         }

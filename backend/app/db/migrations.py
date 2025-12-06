@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本
-CURRENT_DB_VERSION = "1.1.0"
+CURRENT_DB_VERSION = "1.1.5"
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -59,6 +59,17 @@ async def check_column_exists(db: AsyncSession, table: str, column: str) -> bool
         return False
 
 
+async def check_table_exists(db: AsyncSession, table: str) -> bool:
+    """检查表是否存在"""
+    try:
+        result = await db.execute(text(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+        ))
+        return result.fetchone() is not None
+    except Exception:
+        return False
+
+
 async def add_column_if_not_exists(
     db: AsyncSession, 
     table: str, 
@@ -67,6 +78,11 @@ async def add_column_if_not_exists(
     default: str = None
 ) -> bool:
     """如果列不存在则添加"""
+    # 先检查表是否存在
+    if not await check_table_exists(db, table):
+        logger.debug(f"表 {table} 不存在，跳过添加列 {column}")
+        return False
+    
     if await check_column_exists(db, table, column):
         return False
     
@@ -83,67 +99,63 @@ async def add_column_if_not_exists(
         return False
 
 
-# ========== 迁移脚本 ==========
+# ========== 必需的数据库列定义 ==========
+# 格式: (表名, 列名, 列类型, 默认值)
+REQUIRED_COLUMNS = [
+    # v3_products
+    ("v3_products", "unit_id", "INTEGER", None),
+    
+    # v3_order_items
+    ("v3_order_items", "gross_weight", "DECIMAL(12,3)", None),
+    ("v3_order_items", "deduction_formula_id", "INTEGER", None),
+    ("v3_order_items", "storage_rate", "DECIMAL(10,2)", None),
+    ("v3_order_items", "logistics_company_id", "INTEGER", None),
+    
+    # v3_business_orders
+    ("v3_business_orders", "total_shipping", "DECIMAL(12,2)", None),
+    ("v3_business_orders", "total_storage_fee", "DECIMAL(12,2)", None),
+    ("v3_business_orders", "final_amount", "DECIMAL(12,2)", None),
+    ("v3_business_orders", "loading_date", "DATETIME", None),
+    ("v3_business_orders", "unloading_date", "DATETIME", None),
+    ("v3_business_orders", "calculate_storage_fee", "BOOLEAN", "1"),
+    
+    # v3_account_balances
+    ("v3_account_balances", "is_initial", "BOOLEAN", "0"),
+]
 
-async def migrate_v1_0_0(db: AsyncSession) -> None:
+
+async def ensure_all_columns(db: AsyncSession) -> dict:
     """
-    v1.0.0 迁移：初始版本
-    - 确保所有基础表结构完整
+    确保所有必需的列都存在
+    每次启动都会检查，不依赖版本号
     """
-    logger.info("执行 v1.0.0 迁移...")
+    result = {
+        "checked": 0,
+        "added": 0,
+        "columns_added": []
+    }
     
-    # 确保 products 表有 unit_id 字段（新增的包装规格支持）
-    await add_column_if_not_exists(db, "products", "unit_id", "INTEGER")
+    for table, column, col_type, default in REQUIRED_COLUMNS:
+        result["checked"] += 1
+        added = await add_column_if_not_exists(db, table, column, col_type, default)
+        if added:
+            result["added"] += 1
+            result["columns_added"].append(f"{table}.{column}")
     
-    # 确保 order_items 表有扣重相关字段
-    await add_column_if_not_exists(db, "order_items", "gross_weight", "DECIMAL(12,3)")
-    await add_column_if_not_exists(db, "order_items", "deduction_formula_id", "INTEGER")
-    await add_column_if_not_exists(db, "order_items", "storage_rate", "DECIMAL(10,2)")
-    await add_column_if_not_exists(db, "order_items", "logistics_company_id", "INTEGER")
-    
-    # 确保 business_orders 表有汇总字段
-    await add_column_if_not_exists(db, "business_orders", "total_shipping", "DECIMAL(12,2)")
-    await add_column_if_not_exists(db, "business_orders", "total_storage_fee", "DECIMAL(12,2)")
-    await add_column_if_not_exists(db, "business_orders", "final_amount", "DECIMAL(12,2)")
-    
-    logger.info("v1.0.0 迁移完成")
-
-
-async def migrate_v1_1_0(db: AsyncSession) -> None:
-    """
-    v1.1.0 迁移：添加装卸货日期字段和冷藏费开关
-    - 为 business_orders 表添加 loading_date 和 unloading_date 字段
-    - 为 business_orders 表添加 calculate_storage_fee 字段（是否计算冷藏费）
-    """
-    logger.info("执行 v1.1.0 迁移...")
-    
-    # 添加装卸货日期字段
-    await add_column_if_not_exists(db, "v3_business_orders", "loading_date", "DATETIME")
-    await add_column_if_not_exists(db, "v3_business_orders", "unloading_date", "DATETIME")
-    
-    # 添加冷藏费开关字段（默认为1=True，计算冷藏费）
-    await add_column_if_not_exists(db, "v3_business_orders", "calculate_storage_fee", "BOOLEAN", "1")
-    
-    logger.info("v1.1.0 迁移完成")
-
-
-# 迁移脚本映射
-MIGRATIONS = {
-    "1.0.0": migrate_v1_0_0,
-    "1.1.0": migrate_v1_1_0,
-}
+    return result
 
 
 async def run_migrations(db: AsyncSession) -> dict:
     """
     运行数据库迁移
     
-    返回迁移结果统计
+    关键改进：每次启动都检查所有必需列，不仅仅依赖版本号
     """
     result = {
         "old_version": None,
         "new_version": CURRENT_DB_VERSION,
         "migrations_run": [],
+        "columns_added": [],
         "errors": []
     }
     
@@ -155,25 +167,23 @@ async def run_migrations(db: AsyncSession) -> dict:
         current_version = await get_db_version(db)
         result["old_version"] = current_version
         
-        if current_version == CURRENT_DB_VERSION:
-            logger.info(f"数据库已是最新版本: {CURRENT_DB_VERSION}")
-            return result
+        logger.info(f"数据库版本检查: {current_version or '未知'} -> {CURRENT_DB_VERSION}")
         
-        logger.info(f"数据库版本: {current_version or '未知'} -> {CURRENT_DB_VERSION}")
+        # ★ 关键：无论版本号是什么，都强制检查所有必需列 ★
+        column_result = await ensure_all_columns(db)
+        result["columns_added"] = column_result["columns_added"]
         
-        # 执行所有迁移（简化处理：总是执行所有迁移，由迁移脚本自行判断是否需要执行）
-        for version, migration_func in MIGRATIONS.items():
-            try:
-                await migration_func(db)
-                result["migrations_run"].append(version)
-            except Exception as e:
-                error_msg = f"迁移 {version} 失败: {e}"
-                logger.error(error_msg)
-                result["errors"].append(error_msg)
+        if column_result["added"] > 0:
+            logger.info(f"数据库结构更新: 添加了 {column_result['added']} 个列")
+            for col in column_result["columns_added"]:
+                logger.info(f"  - {col}")
+        else:
+            logger.info("数据库结构完整，无需更新")
         
         # 更新版本号
-        await set_db_version(db, CURRENT_DB_VERSION)
-        logger.info(f"数据库迁移完成，当前版本: {CURRENT_DB_VERSION}")
+        if current_version != CURRENT_DB_VERSION:
+            await set_db_version(db, CURRENT_DB_VERSION)
+            logger.info(f"数据库版本已更新为: {CURRENT_DB_VERSION}")
         
     except Exception as e:
         error_msg = f"数据库迁移出错: {e}"
