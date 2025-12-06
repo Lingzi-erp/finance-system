@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 
 interface OrderItemForm {
+  _id: string;  // 唯一标识，用于 React key
   id?: number;
   product_id: number;
   product_name: string;
@@ -29,6 +30,10 @@ interface OrderItemForm {
   // 计价方式：'container'=按件计价, 'weight'=按重量计价
   pricing_mode?: 'container' | 'weight';
 }
+
+// 生成唯一ID
+let editItemIdCounter = 0;
+const generateEditItemId = () => `edit_item_${Date.now()}_${++editItemIdCounter}`;
 
 const ORDER_TYPE_LABELS: Record<string, string> = {
   purchase: '采购单',
@@ -89,6 +94,7 @@ export default function EditOrderPage() {
       setNotes(orderData.notes || '');
       setItems(
         orderData.items.map((item) => ({
+          _id: generateEditItemId(),  // 唯一标识
           id: item.id,
           product_id: item.product_id,
           product_name: item.product_name,
@@ -120,6 +126,7 @@ export default function EditOrderPage() {
     setItems([
       ...items,
       {
+        _id: generateEditItemId(),  // 唯一标识
         product_id: 0,
         product_name: '',
         product_unit: '',
@@ -339,7 +346,7 @@ export default function EditOrderPage() {
           ) : (
             <div className="space-y-4">
               {items.map((item, index) => (
-                <div key={index} className="border border-ink-light rounded-lg p-4 bg-white">
+                <div key={item._id} className="border border-ink-light rounded-lg p-4 bg-white">
                   <div className="flex justify-between items-start mb-3">
                     <span className="text-sm font-medium text-ink-dark">商品 #{index + 1}</span>
                     {!isReturnOrder && (

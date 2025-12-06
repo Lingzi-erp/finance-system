@@ -22,6 +22,7 @@ interface BatchAllocation {
 }
 
 interface OrderItemForm { 
+  _id: string;  // 唯一标识，用于 React key（解决输入框失焦问题）
   product_id: number; 
   product_name: string; 
   product_unit: string;
@@ -54,6 +55,10 @@ interface OrderItemForm {
   // 销售单用
   batch_allocations?: BatchAllocation[];
 }
+
+// 生成唯一ID
+let itemIdCounter = 0;
+const generateItemId = () => `item_${Date.now()}_${++itemIdCounter}`;
 
 export default function NewOrderPage() {
   const router = useRouter();
@@ -228,6 +233,7 @@ export default function NewOrderPage() {
     // 默认计价方式：采购按件，销售按重量
     const defaultPricingMode = orderType === 'purchase' ? 'container' : 'weight';
     setItems([...items, { 
+      _id: generateItemId(),  // 唯一标识
       product_id: 0, product_name: '', product_unit: '', 
       pricing_mode: defaultPricingMode,
       quantity: 1, unit_price: 0, shipping_cost: 0, notes: '', 
@@ -576,7 +582,7 @@ export default function NewOrderPage() {
           {items.length === 0 ? <div className="text-center py-8 text-slate-500"><p>请添加商品</p><Button className="mt-2" onClick={addItem} disabled={orderType === 'sale' && (sourceId === 0 || warehouseStocks.length === 0)}><Plus className="w-4 h-4 mr-1" />添加第一个商品</Button></div> : (
             <div className="space-y-4">
               {items.map((item, index) => (
-                <div key={index} className="border border-slate-200 rounded-lg p-4 bg-white">
+                <div key={item._id} className="border border-slate-200 rounded-lg p-4 bg-white">
                   <div className="flex justify-between items-start mb-3"><span className="text-sm font-medium text-slate-700">商品 #{index + 1}</span><button onClick={() => removeItem(index)} className="text-red-500"><Trash2 className="w-4 h-4" /></button></div>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div className="col-span-2">

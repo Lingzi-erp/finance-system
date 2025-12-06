@@ -2,19 +2,84 @@
 业务单库存操作模块
 - 库存预留、释放、入库、出库
 - 采购完成时自动创建批次
+- 销售完成时自动分配批次（FIFO）并计算利润
 - 删除订单时的库存回滚
 """
 
 from decimal import Decimal
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.v3.business_order import BusinessOrder
 from app.models.v3.deduction_formula import DeductionFormula
+from app.models.v3.stock_batch import StockBatch, OrderItemBatch
 from app.api.api_v3.endpoints.stocks import (
     add_stock, reduce_stock, reserve_stock, release_stock
 )
 from app.api.api_v3.endpoints.batches import create_batch_from_purchase
+
+
+async def _allocate_batches_fifo(
+    db: AsyncSession,
+    item,  # OrderItem
+    warehouse_id: int
+) -> None:
+    """
+    使用FIFO（先进先出）原则为销售明细分配批次并计算成本
+    
+    利润计算依赖批次追溯数据，所以必须在销售确认时自动分配批次。
+    批次成本已包含采购时的运费和冷藏费（real_cost_price）。
+    """
+    quantity_needed = Decimal(str(item.quantity))
+    total_cost = Decimal("0")
+    
+    # 查找该仓库中该商品的可用批次（FIFO：按入库时间升序）
+    result = await db.execute(
+        select(StockBatch)
+        .where(
+            StockBatch.product_id == item.product_id,
+            StockBatch.storage_entity_id == warehouse_id,
+            StockBatch.current_quantity > 0,
+            StockBatch.status != "depleted"
+        )
+        .order_by(StockBatch.received_at.asc())  # 先进先出
+    )
+    batches = result.scalars().all()
+    
+    for batch in batches:
+        if quantity_needed <= 0:
+            break
+            
+        # 计算从该批次分配的数量
+        alloc_qty = min(batch.current_quantity, quantity_needed)
+        
+        # 获取该批次的真实成本价（含采购运费、仓储费等）
+        cost_price = batch.real_cost_price
+        cost_amount = cost_price * alloc_qty
+        
+        # 创建批次关联记录（出库追溯）
+        batch_record = OrderItemBatch(
+            order_item_id=item.id,
+            batch_id=batch.id,
+            quantity=alloc_qty,
+            cost_price=cost_price,
+            cost_amount=cost_amount
+        )
+        db.add(batch_record)
+        
+        # 扣减批次数量
+        batch.current_quantity -= alloc_qty
+        batch.update_status()
+        
+        total_cost += cost_amount
+        quantity_needed -= alloc_qty
+    
+    # 更新明细的成本信息（用于快速查询，但利润以批次追溯为准）
+    if total_cost > 0:
+        item.cost_amount = total_cost
+        item.cost_price = total_cost / Decimal(str(item.quantity)) if item.quantity > 0 else Decimal("0")
+        # 注意：这里不计算 profit，利润统一从批次追溯计算（需扣除销售端运费和冷藏费）
 
 async def handle_stock_changes(
     db: AsyncSession,
@@ -91,11 +156,11 @@ async def handle_stock_changes(
                     reason=f"采购入库 {order.order_no} 批次:{batch.batch_no}")
         
         elif order_type == "sale":
-            # 销售：来源仓库出库
+            # 销售：来源仓库出库 + FIFO分配批次（用于成本和利润追溯）
             if not source_warehouse_id:
                 raise HTTPException(status_code=400, detail="销售来源必须是仓库")
             for item in order.items:
-                # 扣减库存
+                # 1. 扣减库存
                 await reduce_stock(
                     db=db,
                     warehouse_id=source_warehouse_id,
@@ -105,8 +170,10 @@ async def handle_stock_changes(
                     order_id=order.id,
                     order_item_id=item.id,
                     reason=f"销售出库 {order.order_no}",
-                    check_available=True,  # 直接检查可用库存
+                    check_available=True,
                 )
+                # 2. FIFO分配批次并记录成本（批次追溯的关键）
+                await _allocate_batches_fifo(db, item, source_warehouse_id)
         
         elif order_type == "transfer":
             # 调拨：来源仓库出库，目标仓库入库

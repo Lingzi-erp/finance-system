@@ -22,8 +22,8 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.1.6';
-const BUILD_DATE = '2024-12-06';
+const APP_VERSION = '1.1.7';
+const BUILD_DATE = '2024-12-07';
 const CHANGELOG = [
   { version: '1.1.6', date: '2024-12-06', changes: ['自动检测并修复旧版数据库结构', '每次启动强制检查所有必需列'] },
   { version: '1.1.5', date: '2024-12-06', changes: ['修复全新安装时的数据库迁移', '修复迁移脚本表名错误'] },

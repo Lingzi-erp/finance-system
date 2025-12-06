@@ -14,7 +14,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { 
   batchesApi, deductionFormulasApi, 
   StockBatch, DeductionFormula, BATCH_STATUS_MAP,
-  entitiesApi, Entity, productsApi, Product
+  entitiesApi, Entity, productsApi, Product,
+  OutboundRecord
 } from '@/lib/api/v3';
 
 // 解析复式单位信息（如 "箱(20kg)" -> { container: "箱", quantity: 20, unit: "kg" }）
@@ -55,6 +56,8 @@ export default function BatchesPage() {
   
   // 展开详情
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [outboundRecords, setOutboundRecords] = useState<OutboundRecord[]>([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
   
   // 新建批次对话框
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -86,6 +89,31 @@ export default function BatchesPage() {
   }, [search]);
   
   
+  
+  // 加载出库记录
+  const loadOutboundRecords = async (batchId: number) => {
+    setLoadingRecords(true);
+    try {
+      const records = await batchesApi.getOutboundRecords(batchId);
+      setOutboundRecords(records);
+    } catch (err) {
+      console.error('Failed to load outbound records:', err);
+      setOutboundRecords([]);
+    } finally {
+      setLoadingRecords(false);
+    }
+  };
+  
+  // 展开批次时加载出库记录
+  const handleExpandBatch = (batchId: number) => {
+    if (expandedId === batchId) {
+      setExpandedId(null);
+      setOutboundRecords([]);
+    } else {
+      setExpandedId(batchId);
+      loadOutboundRecords(batchId);
+    }
+  };
   
   useEffect(() => {
     loadBatches();
@@ -361,7 +389,7 @@ export default function BatchesPage() {
                     <React.Fragment key={batch.id}>
                       <tr 
                         className={`cursor-pointer ${expandedId === batch.id ? 'bg-slate-50' : ''}`}
-                        onClick={() => setExpandedId(expandedId === batch.id ? null : batch.id)}
+                        onClick={() => handleExpandBatch(batch.id)}
                       >
                         <td>
                           <div className="font-mono text-sm font-medium text-slate-900">{batch.batch_no}</div>
@@ -433,24 +461,26 @@ export default function BatchesPage() {
                         </td>
                       </tr>
                       
-                      {/* 展开详情 */}
+                      {/* 展开详情 - 货物流向追溯 */}
                       {expandedId === batch.id && (
                         <tr>
                           <td colSpan={9} className="p-0 bg-slate-50/50">
                             <div className="p-6">
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                                {/* 来源信息 */}
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                    <Truck className="w-4 h-4 text-slate-400" /> 来源信息
-                                  </h4>
-                                  <div className="space-y-1.5 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">供应商:</span>
-                                      <span className="text-slate-800">{batch.source_entity_name || '-'}</span>
+                              {/* 入库信息（从哪来）*/}
+                              <div className="mb-6">
+                                <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-3">
+                                  <Truck className="w-4 h-4 text-blue-500" />
+                                  <span className="text-blue-600">入库</span>
+                                  <span className="text-slate-400 font-normal">（从哪来）</span>
+                                </h4>
+                                <div className="bg-blue-50/50 rounded-lg p-4 border border-blue-100">
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div>
+                                      <span className="text-slate-500">供应商：</span>
+                                      <span className="text-slate-800 font-medium">{batch.source_entity_name || '-'}</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">采购单:</span>
+                                    <div>
+                                      <span className="text-slate-500">采购单：</span>
                                       {batch.source_order_id ? (
                                         <a 
                                           href={`/orders/${batch.source_order_id}`}
@@ -463,68 +493,108 @@ export default function BatchesPage() {
                                         <span className="text-slate-400">期初数据</span>
                                       )}
                                     </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">入库日期:</span>
-                                      <span className="text-slate-800">
-                                        {batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'}
-                                      </span>
+                                    <div>
+                                      <span className="text-slate-500">入库日期：</span>
+                                      <span className="text-slate-800">{batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">入库数量：</span>
+                                      <span className="text-slate-800 font-medium">{formatNumber(batch.initial_quantity)} {batch.product_unit}</span>
                                     </div>
                                   </div>
-                                </div>
-                                
-                                {/* 重量信息 */}
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                    <Scale className="w-4 h-4 text-slate-400" /> 重量信息
-                                  </h4>
-                                  <div className="space-y-1.5 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">毛重:</span>
-                                      <span className="text-slate-800">
-                                        {batch.gross_weight ? `${formatNumber(batch.gross_weight)} ${batch.product_unit}` : '-'}
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">扣重公式:</span>
-                                      <span className="text-slate-800">{batch.deduction_formula_name || '无'}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                {/* 成本明细 */}
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-1">
-                                    <DollarSign className="w-4 h-4 text-slate-400" /> 成本明细
-                                  </h4>
-                                  <div className="space-y-1.5 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">采购价:</span>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t border-blue-100">
+                                    <div>
+                                      <span className="text-slate-500">采购单价：</span>
                                       <span className="text-slate-800">{formatCurrency(batch.cost_price)}/{batch.product_unit}</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">运费:</span>
+                                    <div>
+                                      <span className="text-slate-500">运费：</span>
                                       <span className="text-slate-800">{formatCurrency(batch.freight_cost)}</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-slate-500">冷藏费:</span>
+                                    <div>
+                                      <span className="text-slate-500">冷藏费：</span>
                                       <span className="text-slate-800">{formatCurrency((batch.storage_fee_paid || 0) + (batch.accumulated_storage_fee || 0))}</span>
                                     </div>
-                                    {/* 复式单位显示每公斤价格 */}
-                                    {(() => {
-                                      const perKgPrice = calcPerKgPrice(batch.real_cost_price, batch.product_unit);
-                                      const parsed = parseUnitForPrice(batch.product_unit);
-                                      if (perKgPrice !== null) {
-                                        return (
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">折合单价:</span>
-                                            <span className="text-emerald-600 font-medium">{formatCurrency(perKgPrice)}/{parsed.baseUnit}</span>
-                                          </div>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
+                                    <div>
+                                      <span className="text-slate-500">综合成本：</span>
+                                      <span className="text-emerald-600 font-medium">{formatCurrency(batch.real_cost_price)}/{batch.product_unit}</span>
+                                    </div>
                                   </div>
                                 </div>
+                              </div>
+                              
+                              {/* 出库记录（到哪去）*/}
+                              <div>
+                                <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-3">
+                                  <Package className="w-4 h-4 text-green-500" />
+                                  <span className="text-green-600">出库记录</span>
+                                  <span className="text-slate-400 font-normal">（到哪去）</span>
+                                  <span className="text-xs text-slate-400 ml-2">
+                                    已出 {formatNumber(batch.initial_quantity - batch.current_quantity)} / 剩余 {formatNumber(batch.current_quantity)}
+                                  </span>
+                                </h4>
+                                
+                                {loadingRecords ? (
+                                  <div className="text-center py-4 text-slate-400">
+                                    <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />
+                                    加载中...
+                                  </div>
+                                ) : outboundRecords.length === 0 ? (
+                                  <div className="bg-slate-100/50 rounded-lg p-4 text-center text-slate-400 text-sm">
+                                    暂无出库记录
+                                  </div>
+                                ) : (
+                                  <div className="bg-green-50/50 rounded-lg border border-green-100 overflow-hidden">
+                                    <table className="w-full text-sm">
+                                      <thead className="bg-green-100/50">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left text-slate-600">销售单</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">客户</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">日期</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">出库数量</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">售价</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">成本</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">利润</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {outboundRecords.map((record) => (
+                                          <tr key={record.id} className="border-t border-green-100">
+                                            <td className="px-3 py-2">
+                                              <a 
+                                                href={`/orders/${record.order_id}`}
+                                                className="text-amber-600 hover:text-amber-700 hover:underline font-medium"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                {record.order_no}
+                                              </a>
+                                              <span className="text-xs text-slate-400 ml-1">({record.order_type_display})</span>
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-700">{record.customer_name}</td>
+                                            <td className="px-3 py-2 text-slate-600">
+                                              {record.order_date ? new Date(record.order_date).toLocaleDateString('zh-CN') : '-'}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-800">
+                                              {formatNumber(record.quantity)}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                              {record.sale_amount ? formatCurrency(record.sale_amount) : '-'}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                              {record.cost_amount ? formatCurrency(record.cost_amount) : '-'}
+                                            </td>
+                                            <td className={`px-3 py-2 text-right font-mono font-medium ${
+                                              record.profit && record.profit > 0 ? 'text-emerald-600' : 
+                                              record.profit && record.profit < 0 ? 'text-red-500' : 'text-slate-400'
+                                            }`}>
+                                              {record.profit !== null ? formatCurrency(record.profit) : '-'}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
                               </div>
                               
                               {/* 备注 */}

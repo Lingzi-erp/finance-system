@@ -14,6 +14,7 @@ from app.models.v3.order_item import OrderItem
 from app.models.v3.entity import Entity
 from app.models.v3.product import Product
 from app.models.v3.stock import Stock
+from app.models.v3.stock_batch import StockBatch, OrderItemBatch
 from app.models.v3.account_balance import AccountBalance
 from app.models.v3.payment_record import PaymentRecord
 from app.schemas.v3.statistics import (
@@ -116,17 +117,52 @@ async def get_dashboard(
     month_purchase = float(month_purchase_row[0]) if month_purchase_row else 0
     month_purchase_count = int(month_purchase_row[1]) if month_purchase_row else 0
     
-    # 本月利润（使用业务日期 order_date 筛选）
-    month_profit_result = await db.execute(
-        select(func.coalesce(func.sum(OrderItem.profit), 0)).join(
-            BusinessOrder, OrderItem.order_id == BusinessOrder.id
+    # 本月利润（完全从单据和批次追溯计算）
+    # 利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费
+    # 注意：运费和冷藏费"两头都是支出"：
+    #   - 采购端支付的运费和冷藏费 → 已计入批次成本（real_cost_price）
+    #   - 销售端支付的运费和冷藏费 → 额外支出
+    
+    # 1. 获取本月销售金额（商品金额，不含运费冷藏费）
+    month_sale_amount_result = await db.execute(
+        select(func.coalesce(func.sum(BusinessOrder.total_amount), 0)).where(
+            BusinessOrder.order_type == "sale",
+            BusinessOrder.status == "completed",
+            BusinessOrder.order_date >= month_start
+        )
+    )
+    month_sale_amount = float(month_sale_amount_result.scalar() or 0)
+    
+    # 2. 获取本月销售对应的批次成本（已包含采购运费和冷藏费）
+    month_cost_result = await db.execute(
+        select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+        .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+        .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+        .where(
+            BusinessOrder.order_type == "sale",
+            BusinessOrder.status == "completed",
+            BusinessOrder.order_date >= month_start
+        )
+    )
+    month_cost = float(month_cost_result.scalar() or 0)
+    
+    # 3. 获取本月销售端支付的运费和冷藏费
+    month_fees_result = await db.execute(
+        select(
+            func.coalesce(func.sum(BusinessOrder.total_shipping), 0),
+            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0)
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
             BusinessOrder.order_date >= month_start
         )
     )
-    month_profit = float(month_profit_result.scalar() or 0)
+    month_fees_row = month_fees_result.first()
+    month_shipping = float(month_fees_row[0]) if month_fees_row else 0
+    month_storage_fee = float(month_fees_row[1]) if month_fees_row else 0
+    
+    # 4. 计算利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费
+    month_profit = month_sale_amount - month_cost - month_shipping - month_storage_fee
     
     # 待处理订单
     pending_orders_result = await db.execute(
@@ -1033,15 +1069,32 @@ async def get_product_trading(
         sale_result = await db.execute(
             select(
                 func.coalesce(func.sum(OrderItem.quantity), 0),
-                func.coalesce(func.sum(OrderItem.amount), 0),
-                func.coalesce(func.sum(OrderItem.profit), 0)
+                func.coalesce(func.sum(OrderItem.amount), 0)
             ).join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
             .where(and_(*sale_conditions))
         )
         sale_row = sale_result.first()
         sale_qty = int(sale_row[0]) if sale_row else 0
         sale_amt = Decimal(str(sale_row[1])) if sale_row else Decimal("0")
-        profit = Decimal(str(sale_row[2])) if sale_row else Decimal("0")
+        
+        # 从批次追溯计算成本
+        cost_result = await db.execute(
+            select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+            .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+            .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(
+                BusinessOrder.order_type == "sale",
+                BusinessOrder.status == "completed",
+                OrderItem.product_id == product.id,
+                *date_conditions
+            ))
+        )
+        cost_amt = Decimal(str(cost_result.scalar() or 0))
+        
+        # 计算该商品对应的运费和冷藏费（按销售金额比例分摊）
+        # 简化处理：商品级别的利润 = 销售金额 - 批次成本
+        # 运费和冷藏费在整体利润中扣除
+        profit = sale_amt - cost_amt
         
         # 库存
         stock_result = await db.execute(

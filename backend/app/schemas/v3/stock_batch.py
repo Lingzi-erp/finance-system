@@ -172,7 +172,7 @@ class OrderItemBatchCreate(BaseModel):
 
 
 class OrderItemBatchResponse(BaseModel):
-    """出货记录响应"""
+    """出货记录响应（批次追溯 - 出库去向）"""
     id: int
     order_item_id: int
     batch_id: int
@@ -182,7 +182,22 @@ class OrderItemBatchResponse(BaseModel):
     cost_amount: Optional[Decimal] = None
     created_at: datetime
     
-    # 批次信息
+    # 销售单信息（出库去向）
+    order_id: Optional[int] = None
+    order_no: str = ""
+    order_type: str = ""
+    order_type_display: str = ""
+    order_date: Optional[datetime] = None
+    # 客户信息
+    customer_id: Optional[int] = None
+    customer_name: str = ""
+    # 销售金额
+    sale_price: Optional[Decimal] = None
+    sale_amount: Optional[Decimal] = None
+    # 利润
+    profit: Optional[Decimal] = None
+    
+    # 批次信息（保留兼容）
     storage_entity_name: str = ""
     source_entity_name: str = ""
 

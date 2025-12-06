@@ -476,18 +476,54 @@ async def get_batch_outbound_records(
     *,
     db: AsyncSession = Depends(get_db),
     batch_id: int) -> Any:
-    """获取批次的出货记录"""
+    """获取批次的出货记录（出库去向追溯）"""
     batch = await db.get(StockBatch, batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
     
     result = await db.execute(
         select(OrderItemBatch).options(
-            selectinload(OrderItemBatch.order_item).selectinload(OrderItem.order),
+            selectinload(OrderItemBatch.order_item).selectinload(OrderItem.order).selectinload(BusinessOrder.target_entity),
             selectinload(OrderItemBatch.batch).selectinload(StockBatch.storage_entity),
-            selectinload(OrderItemBatch.batch).selectinload(StockBatch.source_entity)).where(OrderItemBatch.batch_id == batch_id).order_by(OrderItemBatch.created_at.desc())
+            selectinload(OrderItemBatch.batch).selectinload(StockBatch.source_entity)
+        ).where(OrderItemBatch.batch_id == batch_id).order_by(OrderItemBatch.created_at.desc())
     )
     records = result.scalars().all()
+    
+    order_type_map = {
+        "sale": "销售",
+        "return_out": "退供应商",
+        "transfer": "调拨",
+    }
+    
+    def calc_profit(r):
+        """
+        计算利润 = 销售金额 - 批次成本 - 分摊运费 - 分摊冷藏费
+        运费和冷藏费两头都是支出：
+        - 采购端支付的已计入批次成本（cost_amount）
+        - 销售端支付的按比例分摊
+        """
+        if not r.order_item or not r.order_item.unit_price or not r.cost_amount:
+            return None
+        
+        order = r.order_item.order
+        if not order:
+            return None
+        
+        # 该批次出库对应的销售金额
+        sale_amount = r.order_item.unit_price * r.quantity
+        # 该批次的成本（已含采购运费和冷藏费）
+        cost = r.cost_amount
+        
+        # 按该明细金额占订单总金额的比例分摊销售端的运费和冷藏费
+        order_total = order.total_amount or Decimal("1")
+        item_ratio = (r.order_item.amount or Decimal("0")) / order_total if order_total > 0 else Decimal("0")
+        qty_ratio = r.quantity / r.order_item.quantity if r.order_item.quantity else Decimal("0")
+        
+        shipping_share = (order.total_shipping or Decimal("0")) * item_ratio * qty_ratio
+        storage_fee_share = (order.total_storage_fee or Decimal("0")) * item_ratio * qty_ratio
+        
+        return sale_amount - cost - shipping_share - storage_fee_share
     
     return [
         OrderItemBatchResponse(
@@ -499,8 +535,23 @@ async def get_batch_outbound_records(
             cost_price=r.cost_price,
             cost_amount=r.cost_amount,
             created_at=r.created_at,
+            # 销售单信息
+            order_id=r.order_item.order.id if r.order_item and r.order_item.order else None,
+            order_no=r.order_item.order.order_no if r.order_item and r.order_item.order else "",
+            order_type=r.order_item.order.order_type if r.order_item and r.order_item.order else "",
+            order_type_display=order_type_map.get(r.order_item.order.order_type, "") if r.order_item and r.order_item.order else "",
+            order_date=r.order_item.order.order_date if r.order_item and r.order_item.order else None,
+            # 客户信息（销售单的目标是客户）
+            customer_id=r.order_item.order.target_id if r.order_item and r.order_item.order else None,
+            customer_name=r.order_item.order.target_entity.name if r.order_item and r.order_item.order and r.order_item.order.target_entity else "",
+            # 销售金额和利润
+            sale_price=r.order_item.unit_price if r.order_item else None,
+            sale_amount=r.order_item.unit_price * r.quantity if r.order_item and r.order_item.unit_price else None,
+            profit=calc_profit(r),
+            # 批次信息
             storage_entity_name=r.batch.storage_entity.name if r.batch and r.batch.storage_entity else "",
-            source_entity_name=r.batch.source_entity.name if r.batch and r.batch.source_entity else "")
+            source_entity_name=r.batch.source_entity.name if r.batch and r.batch.source_entity else ""
+        )
         for r in records
     ]
 
