@@ -22,9 +22,10 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.1.7';
+const APP_VERSION = '1.1.8';
 const BUILD_DATE = '2024-12-07';
 const CHANGELOG = [
+  { version: '1.1.8', date: '2024-12-07', changes: ['优化利润计算（基于批次追溯）', '批次详情显示货物流向（入库/出库记录）', '修复输入框点击无反应问题'] },
   { version: '1.1.6', date: '2024-12-06', changes: ['自动检测并修复旧版数据库结构', '每次启动强制检查所有必需列'] },
   { version: '1.1.5', date: '2024-12-06', changes: ['修复全新安装时的数据库迁移', '修复迁移脚本表名错误'] },
   { version: '1.1.4', date: '2024-12-06', changes: ['修复数据库迁移问题', '修复初始化演示数据失败', '优化启动检测逻辑'] },
