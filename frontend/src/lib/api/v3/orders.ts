@@ -123,6 +123,7 @@ export interface OrderCreateData {
   total_discount?: number;
   total_shipping?: number;
   total_storage_fee?: number;
+  calculate_storage_fee?: boolean;
   notes?: string;
   items: {
     product_id: number;

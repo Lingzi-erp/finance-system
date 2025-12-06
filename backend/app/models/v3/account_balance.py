@@ -26,8 +26,11 @@ class AccountBalance(Base):
     # 关联实体（客户或供应商）
     entity_id = Column(Integer, ForeignKey("v3_entities.id"), nullable=False, index=True)
     
-    # 关联业务单
-    order_id = Column(Integer, ForeignKey("v3_business_orders.id"), nullable=False, index=True)
+    # 关联业务单（期初数据可为空）
+    order_id = Column(Integer, ForeignKey("v3_business_orders.id"), nullable=True, index=True)
+    
+    # 是否为期初数据
+    is_initial = Column(Boolean, default=False, comment="是否为期初数据")
     
     # 账款类型
     # receivable: 应收账款（销售产生，客户欠我们）

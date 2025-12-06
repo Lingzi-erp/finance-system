@@ -168,11 +168,11 @@ export default function OrdersPage() {
                   <th>单号</th>
                   <th>类型</th>
                   <th>来源 → 目标</th>
-                  <th className="text-center">数量</th>
-                  <th className="text-right">金额</th>
+                  <th>数量</th>
+                  <th>金额</th>
                   <th>状态</th>
                   <th>日期</th>
-                  <th className="text-center">操作</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,8 +195,8 @@ export default function OrdersPage() {
                         <span className="text-slate-700">{order.target_name}</span>
                       </div>
                     </td>
-                    <td className="text-center text-slate-600">{order.total_quantity}</td>
-                    <td className="text-right font-medium text-slate-900">{formatAmount(order.final_amount)}</td>
+                    <td className="text-slate-600">{order.total_quantity}</td>
+                    <td className="font-medium text-slate-900">{formatAmount(order.final_amount)}</td>
                     <td>
                       <span className={`badge ${ORDER_STATUS_MAP[order.status]?.color || 'badge-neutral'}`}>
                         {order.status_display}

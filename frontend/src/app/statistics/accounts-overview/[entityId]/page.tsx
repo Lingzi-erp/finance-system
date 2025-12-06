@@ -122,10 +122,6 @@ export default function EntityStatementPage() {
                 </p>
               </div>
             </div>
-            <Button onClick={loadData} variant="secondary" size="sm" disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
           </div>
         </div>
       </div>

@@ -4,7 +4,8 @@ from fastapi import APIRouter
 from app.api.api_v3.endpoints import (
     entities, products, stocks, batches, deduction_formulas,
     categories, specifications, units, vehicles,
-    accounts, payments, payment_methods, audit_logs, statistics, backup, system
+    accounts, payments, payment_methods, audit_logs, statistics, backup, system,
+    initial_data
 )
 # 使用拆分后的 orders 模块
 from app.api.api_v3.endpoints.orders import router as orders_router
@@ -33,3 +34,4 @@ api_router.include_router(statistics.router, prefix="/statistics", tags=["统计
 api_router.include_router(audit_logs.router, prefix="/audit-logs", tags=["操作日志"])
 api_router.include_router(backup.router, prefix="/backup", tags=["数据备份"])
 api_router.include_router(system.router, prefix="/system", tags=["系统管理"])
+api_router.include_router(initial_data.router, prefix="/initial-data", tags=["期初数据"])

@@ -15,11 +15,13 @@ export interface AccountBalance {
   due_date?: string;
   status: string;
   notes?: string;
+  is_initial?: boolean;  // 是否为期初数据
   type_display: string;
   status_display: string;
   entity_name: string;
   entity_code: string;
   order_no: string;
+  business_date: string;  // 业务日期（装货/卸货日期）
   created_by: number;
   creator_name: string;
   created_at: string;
@@ -54,6 +56,8 @@ export const accountsApi = {
     balance_type?: string;
     status?: string;
     entity_id?: number;
+    start_date?: string;
+    end_date?: string;
   }) => {
     const query = new URLSearchParams();
     if (params?.page) query.set('page', params.page.toString());
@@ -61,6 +65,8 @@ export const accountsApi = {
     if (params?.balance_type) query.set('balance_type', params.balance_type);
     if (params?.status) query.set('status', params.status);
     if (params?.entity_id) query.set('entity_id', params.entity_id.toString());
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
     
     const res = await fetch(`${API_BASE}/accounts/?${query}`, { headers: getAuthHeaders() });
     return handleResponse<ListResponse<AccountBalance>>(res);

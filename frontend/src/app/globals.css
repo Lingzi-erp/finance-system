@@ -183,7 +183,8 @@ body {
 
 .data-table th {
   padding: 0.75rem 1rem;
-  text-align: left;
+  text-align: center;
+  vertical-align: middle;
   font-size: 0.75rem;
   font-weight: 500;
   text-transform: uppercase;
@@ -202,6 +203,27 @@ body {
 
 .data-table td {
   padding: 0.75rem 1rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* 让 td 内的内容居中，但保持原有的 flex 布局 */
+.data-table td > div:not(.flex),
+.data-table td > span {
+  display: inline-block;
+}
+
+.data-table td > .flex {
+  display: inline-flex;
+}
+
+/* 确保表格行内容垂直居中 */
+.data-table tbody tr {
+  height: 60px;
+}
+
+.data-table td > * {
+  vertical-align: middle;
 }
 
 /* ==========================================

@@ -111,14 +111,18 @@ async def migrate_v1_0_0(db: AsyncSession) -> None:
 
 async def migrate_v1_1_0(db: AsyncSession) -> None:
     """
-    v1.1.0 迁移：添加装卸货日期字段
+    v1.1.0 迁移：添加装卸货日期字段和冷藏费开关
     - 为 business_orders 表添加 loading_date 和 unloading_date 字段
+    - 为 business_orders 表添加 calculate_storage_fee 字段（是否计算冷藏费）
     """
     logger.info("执行 v1.1.0 迁移...")
     
     # 添加装卸货日期字段
     await add_column_if_not_exists(db, "v3_business_orders", "loading_date", "DATETIME")
     await add_column_if_not_exists(db, "v3_business_orders", "unloading_date", "DATETIME")
+    
+    # 添加冷藏费开关字段（默认为1=True，计算冷藏费）
+    await add_column_if_not_exists(db, "v3_business_orders", "calculate_storage_fee", "BOOLEAN", "1")
     
     logger.info("v1.1.0 迁移完成")
 

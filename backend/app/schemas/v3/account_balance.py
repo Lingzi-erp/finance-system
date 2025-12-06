@@ -25,7 +25,7 @@ class AccountBalanceResponse(BaseModel):
     """账款响应"""
     id: int
     entity_id: int
-    order_id: int
+    order_id: Optional[int] = None  # 期初数据可能没有订单ID
     balance_type: str
     amount: float
     paid_amount: float
@@ -33,15 +33,19 @@ class AccountBalanceResponse(BaseModel):
     due_date: Optional[datetime]
     status: str
     notes: Optional[str]
+    is_initial: bool = False  # 是否为期初数据
     
     # 显示字段
     type_display: str
     status_display: str
     entity_name: str = ""
     entity_code: str = ""
-    order_no: str = ""
+    order_no: Optional[str] = ""  # 期初数据没有订单号
     
-    # 审计信息
+    # 业务日期（从关联订单获取，期初数据使用创建时间）
+    business_date: datetime
+    
+    # 审计信息（仅用于流程记录参考）
     created_by: int
     creator_name: str = ""
     created_at: datetime

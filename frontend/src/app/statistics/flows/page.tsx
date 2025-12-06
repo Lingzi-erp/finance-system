@@ -124,10 +124,6 @@ export default function FlowsHistoryPage() {
                 <p className="text-violet-200 text-sm">查询所有仓库的入库、出库、调整记录</p>
               </div>
             </div>
-            <Button onClick={handleRefresh} variant="secondary" size="sm" disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
           </div>
         </div>
       </div>

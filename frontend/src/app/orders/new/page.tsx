@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-import { entitiesApi, productsApi, ordersApi, stocksApi, batchesApi, deductionFormulasApi, vehiclesApi, Entity, Product, OrderCreateData, WarehouseStock, StockBatch, DeductionFormula, VehicleSimple } from '@/lib/api/v3';
+import { entitiesApi, productsApi, ordersApi, stocksApi, batchesApi, deductionFormulasApi, Entity, Product, OrderCreateData, WarehouseStock, StockBatch, DeductionFormula } from '@/lib/api/v3';
 import { FileText, Plus, Trash2, ArrowRight, AlertTriangle, Truck, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -76,12 +76,42 @@ export default function NewOrderPage() {
   
   // 单据级别的运输信息
   const [logisticsCompanyId, setLogisticsCompanyId] = useState<number>(0);
-  const [vehicleId, setVehicleId] = useState<number>(0);
-  const [vehicles, setVehicles] = useState<VehicleSimple[]>([]);
+  const [plateNumber, setPlateNumber] = useState('');  // 车牌号（手动填写）
   const [driverPhone, setDriverPhone] = useState('');  // 司机电话（每次运输可能不同）
   const [invoiceNo, setInvoiceNo] = useState('');
   const [shippingCost, setShippingCost] = useState<number>(0); // 运费（手动输入）
-  const [storageFee, setStorageFee] = useState<number>(0); // 冷藏费（手动输入）
+  const [storageFee, setStorageFee] = useState<number>(0); // 冷藏费（自动计算）
+  const [calculateStorageFee, setCalculateStorageFee] = useState<boolean>(true); // 是否计算冷藏费
+  
+  // 自动计算冷藏费
+  // 采购单：每吨15元（入库费）
+  // 销售单：每吨15元（出库费）+ 每吨每天1.5元（存储费）
+  useEffect(() => {
+    // 如果用户选择不计算冷藏费，设为0
+    if (!calculateStorageFee) {
+      setStorageFee(0);
+      return;
+    }
+    
+    const totalWeight = items.reduce((sum, item) => sum + getItemActualWeight(item), 0);
+    const weightTons = totalWeight / 1000;
+    const baseRatePerTon = 15; // 进出库基础费率：每吨15元
+    const storageCostPerTonPerDay = 1.5; // 存储费率：每吨每天1.5元
+    
+    if (orderType === 'purchase') {
+      // 采购单：入库费 = 吨数 × 15
+      const fee = weightTons * baseRatePerTon;
+      setStorageFee(Math.round(fee * 100) / 100);
+    } else if (orderType === 'sale') {
+      // 销售单：出库费 + 存储费
+      // 实际值由后端根据：装货日期 - 批次入库日期（采购单卸货日期）计算
+      const estimatedDays = 7; // 预估平均存储天数
+      const baseFee = weightTons * baseRatePerTon;
+      const storageCost = weightTons * estimatedDays * storageCostPerTonPerDay;
+      const estimatedFee = baseFee + storageCost;
+      setStorageFee(Math.round(estimatedFee * 100) / 100);
+    }
+  }, [orderType, items, calculateStorageFee]);
   
   // 装卸货日期
   const [loadingDate, setLoadingDate] = useState<string>('');
@@ -92,16 +122,6 @@ export default function NewOrderPage() {
   
   // 商品搜索
   const [productSearch, setProductSearch] = useState('');
-  
-  // 当选择物流公司时，加载该公司的车辆
-  useEffect(() => {
-    if (logisticsCompanyId > 0) {
-      vehiclesApi.listSimple(logisticsCompanyId).then(setVehicles).catch(() => setVehicles([]));
-    } else {
-      setVehicles([]);
-      setVehicleId(0);
-    }
-  }, [logisticsCompanyId]);
   
   // 判断商品是否有包装规格
   const hasSpec = (item: OrderItemForm) => {
@@ -155,18 +175,11 @@ export default function NewOrderPage() {
   // 当销售来源是仓库时，加载该仓库的库存
   useEffect(() => {
     if (orderType === 'sale' && sourceId) {
-      // 检查来源是否是仓库类型
-      const source = entities.find(e => e.id === sourceId);
-      if (source?.entity_type?.includes('warehouse')) {
-        loadWarehouseStocks(sourceId);
-      } else {
-        // 来源是供应商时，不加载库存
-        setWarehouseStocks([]);
-      }
+      loadWarehouseStocks(sourceId);
     } else {
       setWarehouseStocks([]);
     }
-  }, [orderType, sourceId, entities]);
+  }, [orderType, sourceId]);
 
   const loadBaseData = async () => {
     try {
@@ -198,17 +211,9 @@ export default function NewOrderPage() {
   const getSourceOptions = () => {
     switch (orderType) {
       case 'purchase': return entities.filter(e => e.entity_type.includes('supplier'));
-      // 销售来源可以是仓库（从库存出）或供应商（直发客户）
-      case 'sale': return entities.filter(e => e.entity_type.includes('warehouse') || e.entity_type.includes('supplier'));
+      case 'sale': return entities.filter(e => e.entity_type.includes('warehouse'));
       default: return entities;
     }
-  };
-  
-  // 判断销售来源是仓库还是供应商
-  const isSaleFromWarehouse = () => {
-    if (orderType !== 'sale' || !sourceId) return false;
-    const source = entities.find(e => e.id === sourceId);
-    return source?.entity_type?.includes('warehouse') || false;
   };
 
   const getTargetOptions = () => {
@@ -318,8 +323,8 @@ export default function NewOrderPage() {
           newItems[index].pricing_mode = 'weight';
         }
       }
-      // 如果是销售且来源是仓库，查找库存信息
-      if (orderType === 'sale' && isSaleFromWarehouse()) {
+      // 如果是销售，查找库存信息
+      if (orderType === 'sale') {
         const stock = warehouseStocks.find(s => s.product_id === value);
         newItems[index].available_quantity = stock?.available_quantity;
       }
@@ -394,16 +399,16 @@ export default function NewOrderPage() {
     };
   };
 
-  // 获取可选商品列表（销售时根据来源类型过滤，支持搜索过滤）
+  // 获取可选商品列表（销售时根据库存过滤，支持搜索过滤）
   const getAvailableProducts = () => {
     let result = products;
     
-    // 销售且来源是仓库时，仅返回有库存的商品
-    if (orderType === 'sale' && isSaleFromWarehouse()) {
+    // 销售时，仅返回有库存的商品
+    if (orderType === 'sale') {
       const stockProductIds = warehouseStocks.map(s => s.product_id);
       result = result.filter(p => stockProductIds.includes(p.id));
     }
-    // 销售来源是供应商时，可选择任意商品（直发，不走库存）
+    // 直销从供应商发货，可选择任意商品（不走库存）
     
     // 搜索过滤
     if (productSearch.trim()) {
@@ -427,9 +432,9 @@ export default function NewOrderPage() {
     return p.name;
   };
   
-  // 获取商品的可用库存（仅当销售来源是仓库时有意义）
+  // 获取商品的可用库存（仅销售单有意义）
   const getProductAvailableQuantity = (productId: number): number | undefined => {
-    if (orderType !== 'sale' || !isSaleFromWarehouse()) return undefined;
+    if (orderType !== 'sale') return undefined;
     const stock = warehouseStocks.find(s => s.product_id === productId);
     return stock?.available_quantity;
   };
@@ -438,12 +443,11 @@ export default function NewOrderPage() {
     if (!sourceId || !targetId) { toast({ title: '请选择来源和目标', variant: 'destructive' }); return; }
     if (items.length === 0 || items.some(item => !item.product_id)) { toast({ title: '请添加商品', variant: 'destructive' }); return; }
     if (!logisticsCompanyId) { toast({ title: '请选择物流公司', variant: 'destructive' }); return; }
-    if (!vehicleId) { toast({ title: '请选择车辆', variant: 'destructive' }); return; }
     if (!loadingDate) { toast({ title: '请选择装货日期', variant: 'destructive' }); return; }
     if (!unloadingDate) { toast({ title: '请选择卸货日期', variant: 'destructive' }); return; }
     
-    // 校验库存（仅当销售来源是仓库时）
-    if (orderType === 'sale' && isSaleFromWarehouse()) {
+    // 校验库存（销售单需要校验，直销不需要）
+    if (orderType === 'sale') {
       for (const item of items) {
         const available = getProductAvailableQuantity(item.product_id);
         if (available !== undefined && item.quantity > available) {
@@ -463,6 +467,7 @@ export default function NewOrderPage() {
         unloading_date: unloadingDate || undefined,
         total_shipping: shippingCost || undefined,
         total_storage_fee: storageFee || undefined,
+        calculate_storage_fee: calculateStorageFee,
         notes: notes || undefined, 
         items: items.map((item, idx) => ({ 
           product_id: item.product_id, 
@@ -481,14 +486,13 @@ export default function NewOrderPage() {
           container_count: item.pricing_mode === 'container' ? item.quantity : (item.unit_quantity ? item.quantity / item.unit_quantity : undefined),
           // 单据级别运输信息应用到每个 item（用于生成分离的账单）
           logistics_company_id: logisticsCompanyId || undefined,
-          vehicle_id: vehicleId || undefined,
-          plate_number: vehicleId ? vehicles.find(v => v.id === vehicleId)?.plate_number : undefined,
+          plate_number: plateNumber || undefined,
           driver_phone: driverPhone || undefined,
           logistics_company: logisticsCompanyId ? logisticsCompanies.find(e => e.id === logisticsCompanyId)?.name : undefined,
           invoice_no: invoiceNo || undefined,
           // 采购相关：每个商品保存自己的毛重和扣重公式
-          gross_weight: orderType === 'purchase' ? item.gross_weight : undefined,
-          deduction_formula_id: orderType === 'purchase' ? item.deduction_formula_id : undefined,
+          gross_weight: item.gross_weight || undefined,
+          deduction_formula_id: item.deduction_formula_id || undefined,
         })) 
       };
       const result = await ordersApi.create(data);
@@ -500,7 +504,7 @@ export default function NewOrderPage() {
 
   const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 }).format(amount);
   const getTypeLabel = (type: string) => ({ purchase: '采购单', sale: '销售单' }[type] || type);
-  const getSourceLabel = () => ({ purchase: '供应商', sale: '出货方' }[orderType] || '来源');
+  const getSourceLabel = () => ({ purchase: '供应商', sale: '出库仓库' }[orderType] || '来源');
   const getTargetLabel = () => ({ purchase: '入库仓库', sale: '客户' }[orderType] || '目标');
 
   if (loading) return <div className="flex justify-center items-center h-screen"><p>加载中...</p></div>;
@@ -517,8 +521,18 @@ export default function NewOrderPage() {
         <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">业务类型</h2>
           <div className="flex flex-wrap gap-3">
-            {[{ value: 'purchase', label: '采购', color: 'bg-blue-500' }, { value: 'sale', label: '销售', color: 'bg-green-500' }].map(type => (
-              <button key={type.value} onClick={() => { setOrderType(type.value); setSourceId(0); setTargetId(0); }} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${orderType === type.value ? `${type.color} text-white` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{type.label}</button>
+            {[
+              { value: 'purchase', label: '采购', color: 'bg-blue-500', desc: '供应商→仓库' }, 
+              { value: 'sale', label: '销售', color: 'bg-green-500', desc: '仓库→客户' }
+            ].map(type => (
+              <button 
+                key={type.value} 
+                onClick={() => { setOrderType(type.value); setSourceId(0); setTargetId(0); setItems([]); }} 
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex flex-col items-center ${orderType === type.value ? `${type.color} text-white` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              >
+                <span>{type.label}</span>
+                <span className={`text-xs ${orderType === type.value ? 'text-white/80' : 'text-gray-500'}`}>{type.desc}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -532,23 +546,10 @@ export default function NewOrderPage() {
                 <SelectTrigger><SelectValue placeholder="请选择" /></SelectTrigger>
                 <SelectContent>
                   {getSourceOptions().map(e => (
-                    <SelectItem key={e.id} value={e.id.toString()}>
-                      <div className="flex items-center gap-2">
-                        <span>{e.name}</span>
-                        {orderType === 'sale' && e.entity_type?.includes('warehouse') && (
-                          <span className="text-xs text-blue-500">[仓库]</span>
-                        )}
-                        {orderType === 'sale' && e.entity_type?.includes('supplier') && (
-                          <span className="text-xs text-green-500">[供应商直发]</span>
-                        )}
-                      </div>
-                    </SelectItem>
+                    <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {orderType === 'sale' && (
-                <p className="text-xs text-slate-400 mt-1">可选仓库出库或供应商直发</p>
-              )}
             </div>
             <ArrowRight className="w-6 h-6 text-slate-500 mt-6" />
             <div className="flex-1"><label className="text-sm text-slate-700 block mb-1">{getTargetLabel()} *</label><Select value={targetId.toString()} onValueChange={v => setTargetId(parseInt(v))}><SelectTrigger><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{getTargetOptions().map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>)}</SelectContent></Select></div>
@@ -559,20 +560,20 @@ export default function NewOrderPage() {
           <div className="flex justify-between items-center mb-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">商品明细</h2>
+              {orderType === 'sale' && !sourceId && (
+                <p className="text-xs text-amber-600 mt-1">请先选择出库仓库</p>
+              )}
               {orderType === 'sale' && sourceId > 0 && (
                 <p className="text-xs text-slate-500 mt-1">
-                  {isSaleFromWarehouse() 
-                    ? (stocksLoading ? '加载库存中...' : warehouseStocks.length === 0 ? '该仓库暂无库存' : `可选 ${warehouseStocks.length} 种库存商品`)
-                    : '从供应商直发，可选择任意商品'
-                  }
+                  {stocksLoading ? '加载库存中...' : warehouseStocks.length === 0 ? '该仓库暂无库存' : `可选 ${warehouseStocks.length} 种库存商品`}
                 </p>
               )}
             </div>
-            <Button size="sm" onClick={addItem} disabled={orderType === 'sale' && isSaleFromWarehouse() && warehouseStocks.length === 0}>
+            <Button size="sm" onClick={addItem} disabled={orderType === 'sale' && (sourceId === 0 || warehouseStocks.length === 0)}>
               <Plus className="w-4 h-4 mr-1" />添加商品
             </Button>
           </div>
-          {items.length === 0 ? <div className="text-center py-8 text-slate-500"><p>请添加商品</p><Button className="mt-2" onClick={addItem}><Plus className="w-4 h-4 mr-1" />添加第一个商品</Button></div> : (
+          {items.length === 0 ? <div className="text-center py-8 text-slate-500"><p>请添加商品</p><Button className="mt-2" onClick={addItem} disabled={orderType === 'sale' && (sourceId === 0 || warehouseStocks.length === 0)}><Plus className="w-4 h-4 mr-1" />添加第一个商品</Button></div> : (
             <div className="space-y-4">
               {items.map((item, index) => (
                 <div key={index} className="border border-slate-200 rounded-lg p-4 bg-white">
@@ -683,8 +684,8 @@ export default function NewOrderPage() {
                     <div><label className="text-xs text-slate-500 block mb-1">小计</label><div className="h-10 flex items-center font-medium text-slate-900">{formatAmount(item.quantity * item.unit_price)}</div></div>
                   </div>
                   
-                  {/* 采购单毛重扣重区域：散装规格 或 无规格的重量商品 */}
-                  {orderType === 'purchase' && item.product_id > 0 && (
+                  {/* 毛重扣重区域：散装规格 或 无规格的重量商品（采购/销售通用） */}
+                  {['purchase', 'sale'].includes(orderType) && item.product_id > 0 && (
                     (hasSpec(item) && isSpecBulk(item)) || (!hasSpec(item) && isWeightBasedUnit(item.product_unit))
                   ) && (
                     <div className="mt-3 pt-3 border-t border-slate-200/50 bg-amber-50/50 -mx-4 px-4 pb-3 rounded-b-lg">
@@ -787,10 +788,7 @@ export default function NewOrderPage() {
               <label className="text-xs text-slate-500 block mb-1">物流公司 <span className="text-amber-600">*</span></label>
               <Select 
                 value={logisticsCompanyId > 0 ? logisticsCompanyId.toString() : ''} 
-                onValueChange={v => {
-                  setLogisticsCompanyId(parseInt(v) || 0);
-                  setVehicleId(0); // 切换物流公司时清空车辆选择
-                }}
+                onValueChange={v => setLogisticsCompanyId(parseInt(v) || 0)}
               >
                 <SelectTrigger><SelectValue placeholder="选择物流公司" /></SelectTrigger>
                 <SelectContent>
@@ -810,32 +808,14 @@ export default function NewOrderPage() {
               )}
             </div>
             
-            {/* 车辆（级联：需先选物流公司） */}
+            {/* 车牌号（手动填写，选填） */}
             <div>
-              <label className="text-xs text-slate-500 block mb-1">车辆 <span className="text-amber-600">*</span></label>
-              <Select 
-                value={vehicleId > 0 ? vehicleId.toString() : ''} 
-                onValueChange={v => setVehicleId(parseInt(v) || 0)}
-                disabled={logisticsCompanyId === 0}
-              >
-                <SelectTrigger><SelectValue placeholder={logisticsCompanyId > 0 ? "选择车辆" : "请先选择物流公司"} /></SelectTrigger>
-                <SelectContent>
-                  {vehicles.length === 0 ? (
-                    <SelectItem value="none" disabled>该公司暂无车辆</SelectItem>
-                  ) : (
-                    vehicles.map(v => (
-                      <SelectItem key={v.id} value={v.id.toString()}>
-                        {v.plate_number} {v.vehicle_type && <span className="text-slate-400">({v.vehicle_type})</span>}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              {logisticsCompanyId > 0 && vehicles.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  <Link href={`/entities/${logisticsCompanyId}/vehicles`} className="underline">添加车辆</Link>
-                </p>
-              )}
+              <label className="text-xs text-slate-500 block mb-1">车牌号</label>
+              <Input 
+                value={plateNumber} 
+                onChange={e => setPlateNumber(e.target.value)}
+                placeholder="如：鲁B12345"
+              />
             </div>
             
             {/* 司机电话（可选，每次运输可能不同） */}
@@ -928,15 +908,26 @@ export default function NewOrderPage() {
           {/* 采购单：运费和冷藏费 */}
           {orderType === 'purchase' && (
             <div className="mt-4 pt-4 border-t border-slate-200/50">
-              <h3 className="text-sm font-medium text-slate-700 mb-3">运费与冷藏费</h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-slate-700">运费与冷藏费</h3>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={calculateStorageFee} 
+                    onChange={e => setCalculateStorageFee(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-slate-600">计算冷藏费</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">总毛重（参考）</label>
                   <div className="h-10 flex items-center text-sm font-medium text-slate-900 bg-gray-50 rounded px-3">
                     {totalGrossWeight > 0 ? `${totalGrossWeight.toLocaleString()} kg` : '-'}
                   </div>
                 </div>
-                <div className="col-span-2">
+                <div>
                   <label className="text-xs text-slate-500 block mb-1">运费（元）</label>
                   <Input 
                     type="number" 
@@ -948,40 +939,34 @@ export default function NewOrderPage() {
                   />
                   <p className="text-xs text-slate-400 mt-1">💡 应付物流公司</p>
                 </div>
-                <div className="col-span-2">
+                <div>
                   <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={storageFee || ''} 
-                    onChange={e => setStorageFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="冷库账单金额"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">💡 应付冷库（入库仓库）</p>
+                  <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-green-600 bg-green-50 border-green-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+                    {calculateStorageFee ? `¥${storageFee.toFixed(2)}` : '不计算'}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">💡 每吨15元，应付冷库</p>
                 </div>
               </div>
             </div>
           )}
           
-          {/* 销售单：冷藏费（出库时结算） */}
+          {/* 销售单：运费和冷藏费 */}
           {orderType === 'sale' && (
             <div className="mt-4 pt-4 border-t border-slate-200/50">
-              <h3 className="text-sm font-medium text-slate-700 mb-3">冷藏费（出库结算）</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="col-span-2">
-                  <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={storageFee || ''} 
-                    onChange={e => setStorageFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="冷库账单金额"
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-slate-700">运费与冷藏费</h3>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={calculateStorageFee} 
+                    onChange={e => setCalculateStorageFee(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-slate-400 mt-1">💡 应付冷库（出库仓库），根据存储时间和重量由冷库计算</p>
-                </div>
-                <div className="col-span-2">
+                  <span className="text-xs text-slate-600">计算冷藏费</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
                   <label className="text-xs text-slate-500 block mb-1">运费（元）</label>
                   <Input 
                     type="number" 
@@ -993,9 +978,25 @@ export default function NewOrderPage() {
                   />
                   <p className="text-xs text-slate-400 mt-1">💡 应付物流公司（如有）</p>
                 </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
+                  <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+                    {calculateStorageFee 
+                      ? (items.length > 0 ? `预估 ¥${storageFee.toFixed(2)}` : '添加商品后计算')
+                      : '不计算'
+                    }
+                  </div>
+                  {calculateStorageFee && (
+                    <>
+                      <p className="text-xs text-slate-400 mt-1">💡 每吨15元 + 每吨×存储天数×1.5元</p>
+                      <p className="text-xs text-slate-400">存储天数 = 装货日期 - 入库日期</p>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
+          
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">

@@ -17,7 +17,12 @@ export function getAuthHeaders(): HeadersInit {
 export async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: '请求失败' }));
-    throw new Error(error.detail || '请求失败');
+    // 处理 Pydantic 验证错误格式
+    if (Array.isArray(error.detail)) {
+      const msg = error.detail.map((e: any) => e.msg || e).join(', ');
+      throw new Error(msg || '请求失败');
+    }
+    throw new Error(error.detail || JSON.stringify(error) || '请求失败');
   }
   return res.json();
 }

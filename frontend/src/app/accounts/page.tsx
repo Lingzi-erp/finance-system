@@ -10,10 +10,11 @@ import {
 } from '@/lib/api/v3';
 import { 
   Receipt, ArrowDownCircle, ArrowUpCircle, 
-  CreditCard, BarChart3, Wallet
+  CreditCard, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function AccountsPage() {
@@ -27,8 +28,10 @@ export default function AccountsPage() {
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
-  useEffect(() => { loadData(); }, [page, typeFilter, statusFilter]);
+  useEffect(() => { loadData(); }, [page, typeFilter, statusFilter, startDate, endDate]);
 
   const loadData = async () => {
     try {
@@ -39,7 +42,9 @@ export default function AccountsPage() {
           page, 
           limit: 20, 
           balance_type: typeFilter || undefined,
-          status: statusFilter || undefined 
+          status: statusFilter || undefined,
+          start_date: startDate || undefined,
+          end_date: endDate || undefined
         }),
         accountsApi.getSummary()
       ]);
@@ -80,20 +85,12 @@ export default function AccountsPage() {
               <p className="text-sm text-slate-500">管理应收应付账款余额</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Link href="/statistics/accounts">
-              <Button variant="outline">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                往来分析
-              </Button>
-            </Link>
-            <Link href="/payments">
-              <Button variant="outline">
-                <CreditCard className="w-4 h-4 mr-2" />
-                资金流水
-              </Button>
-            </Link>
-          </div>
+          <Link href="/payments">
+            <Button variant="outline">
+              <CreditCard className="w-4 h-4 mr-2" />
+              资金流水
+            </Button>
+          </Link>
         </div>
 
         {/* 汇总卡片 */}
@@ -169,6 +166,14 @@ export default function AccountsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="w-36">
+              <label className="form-label">开始日期</label>
+              <Input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} />
+            </div>
+            <div className="w-36">
+              <label className="form-label">结束日期</label>
+              <Input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} />
+            </div>
             <div className="text-sm text-slate-500">共 {total} 条记录</div>
           </div>
         </div>
@@ -182,12 +187,12 @@ export default function AccountsPage() {
                   <th>类型</th>
                   <th>客商</th>
                   <th>关联单号</th>
-                  <th className="text-right">金额</th>
-                  <th className="text-right">已付</th>
-                  <th className="text-right">余额</th>
+                  <th>金额</th>
+                  <th>已付</th>
+                  <th>余额</th>
                   <th>状态</th>
-                  <th>创建时间</th>
-                  <th className="text-center">操作</th>
+                  <th>业务日期</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -207,9 +212,9 @@ export default function AccountsPage() {
                         {account.order_no}
                       </Link>
                     </td>
-                    <td className="text-right font-medium text-slate-900">{formatAmount(account.amount)}</td>
-                    <td className="text-right text-slate-500">{formatAmount(account.paid_amount)}</td>
-                    <td className="text-right font-bold text-indigo-600">{formatAmount(account.balance)}</td>
+                    <td className="font-medium text-slate-900">{formatAmount(account.amount)}</td>
+                    <td className="text-slate-500">{formatAmount(account.paid_amount)}</td>
+                    <td className="font-bold text-indigo-600">{formatAmount(account.balance)}</td>
                     <td>
                       <span className={`badge ${
                         account.status === 'paid' ? 'badge-success' : 
@@ -219,9 +224,9 @@ export default function AccountsPage() {
                       </span>
                     </td>
                     <td className="text-slate-500">
-                      {new Date(account.created_at).toLocaleDateString('zh-CN')}
+                      {new Date(account.business_date || account.created_at).toLocaleDateString('zh-CN')}
                     </td>
-                    <td className="text-center">
+                    <td>
                       {account.status !== 'paid' && account.status !== 'cancelled' && account.balance > 0 && (
                         <Link href={`/payments/new?account_id=${account.id}&entity_id=${account.entity_id}&type=${account.balance_type === 'receivable' ? 'receive' : 'pay'}&amount=${account.balance}`}>
                           {account.balance_type === 'receivable' ? (

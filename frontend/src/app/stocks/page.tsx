@@ -201,10 +201,6 @@ export default function StocksPage() {
               <p className="text-sm text-slate-500">查看和管理各仓库的商品库存</p>
             </div>
           </div>
-          <Button onClick={handleRefresh} variant="outline" disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? '刷新中...' : '刷新'}
-          </Button>
         </div>
         
         {/* 筛选栏 */}
@@ -258,10 +254,10 @@ export default function StocksPage() {
                 <tr>
                     <th>仓库</th>
                     <th>商品</th>
-                    <th className="text-right">当前库存</th>
-                    <th className="text-right">预留</th>
-                    <th className="text-right">可用</th>
-                    <th className="text-center">操作</th>
+                    <th>当前库存</th>
+                    <th>预留</th>
+                    <th>可用</th>
+                    <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -292,7 +288,7 @@ export default function StocksPage() {
                           </div>
                         </div>
                       </td>
-                        <td className="text-right">
+                        <td>
                         {stock.unit_quantity && stock.unit_quantity > 1 ? (
                           <div>
                               <div className="font-mono font-semibold text-slate-900">
@@ -306,7 +302,7 @@ export default function StocksPage() {
                             <span className="font-mono text-slate-900">{stock.quantity} {stock.product_unit}</span>
                         )}
                       </td>
-                        <td className="text-right">
+                        <td>
                         {stock.unit_quantity && stock.unit_quantity > 1 ? (
                           <div>
                               <div className="font-mono text-amber-600">
@@ -320,7 +316,7 @@ export default function StocksPage() {
                             <span className="font-mono text-amber-600">{stock.reserved_quantity}</span>
                         )}
                       </td>
-                        <td className="text-right">
+                        <td>
                         {stock.unit_quantity && stock.unit_quantity > 1 ? (
                           <div>
                               <div className="font-mono font-semibold text-green-600">

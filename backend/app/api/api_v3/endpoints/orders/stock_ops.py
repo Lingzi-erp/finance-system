@@ -91,23 +91,11 @@ async def handle_stock_changes(
                     reason=f"采购入库 {order.order_no} 批次:{batch.batch_no}")
         
         elif order_type == "sale":
-            # 销售：来源仓库出库 + 扣减批次
+            # 销售：来源仓库出库
             if not source_warehouse_id:
                 raise HTTPException(status_code=400, detail="销售来源必须是仓库")
             for item in order.items:
-                # 1. 扣减批次（如果有批次记录）
-                if hasattr(item, 'batch_records') and item.batch_records:
-                    total_cost = Decimal("0")
-                    for batch_record in item.batch_records:
-                        # 批次数量在创建订单时已经扣减，这里只需计算成本
-                        total_cost += batch_record.cost_amount or Decimal("0")
-                    # 更新明细的成本信息
-                    if item.quantity > 0:
-                        item.cost_amount = total_cost
-                        item.cost_price = total_cost / Decimal(str(item.quantity))
-                        item.profit = item.amount - total_cost
-                
-                # 2. 扣减库存
+                # 扣减库存
                 await reduce_stock(
                     db=db,
                     warehouse_id=source_warehouse_id,

@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { 
-  BarChart3, History, TrendingUp,
+  BarChart3, History, TrendingUp, Package,
   Receipt, ChevronRight
 } from 'lucide-react';
 
@@ -25,7 +25,7 @@ const dataModules = [
     items: [
       {
         id: 'accounts-overview',
-        title: '往来账款',
+        title: '快捷对账',
         description: '应收账款 · 应付账款 · 往来对账',
         icon: Receipt,
         href: '/statistics/accounts-overview',
@@ -49,6 +49,17 @@ const dataModules = [
         gradient: 'from-blue-500 to-indigo-600',
         bgLight: 'bg-blue-50',
         textColor: 'text-blue-600',
+        available: true
+      },
+      {
+        id: 'product-trading',
+        title: '商品进销统计',
+        description: '采购 · 销售 · 库存 · 毛利',
+        icon: Package,
+        href: '/statistics/product-trading',
+        gradient: 'from-indigo-500 to-cyan-600',
+        bgLight: 'bg-indigo-50',
+        textColor: 'text-indigo-600',
         available: true
       },
     ]

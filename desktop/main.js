@@ -17,6 +17,57 @@ autoUpdater.logger.transports.file.level = 'info';
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// 下载进度窗口
+let progressWindow = null;
+
+// 创建下载进度窗口
+function createProgressWindow() {
+  if (progressWindow) {
+    progressWindow.focus();
+    return;
+  }
+  
+  progressWindow = new BrowserWindow({
+    width: 400,
+    height: 150,
+    parent: mainWindow,
+    modal: true,
+    frame: false,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+  
+  progressWindow.loadFile(path.join(__dirname, 'progress.html'));
+  
+  progressWindow.on('closed', () => {
+    progressWindow = null;
+  });
+}
+
+// 更新进度窗口
+function updateProgress(percent, transferred, total, speed) {
+  if (progressWindow && !progressWindow.isDestroyed()) {
+    progressWindow.webContents.executeJavaScript(`
+      document.getElementById('progress').style.width = '${percent.toFixed(1)}%';
+      document.getElementById('status').textContent = '已下载 ${percent.toFixed(1)}%';
+      document.getElementById('speed').textContent = '${speed} - ${transferred} / ${total}';
+    `);
+  }
+}
+
+// 关闭进度窗口
+function closeProgressWindow() {
+  if (progressWindow && !progressWindow.isDestroyed()) {
+    progressWindow.close();
+    progressWindow = null;
+  }
+}
+
 // 更新事件处理
 function setupAutoUpdater() {
   // 检查到有可用更新
@@ -31,6 +82,7 @@ function setupAutoUpdater() {
       cancelId: 1
     }).then((result) => {
       if (result.response === 0) {
+        createProgressWindow();
         autoUpdater.downloadUpdate();
       }
     });
@@ -47,12 +99,16 @@ function setupAutoUpdater() {
 
   // 更新下载进度
   autoUpdater.on('download-progress', (progressObj) => {
-    let message = `下载速度: ${formatBytes(progressObj.bytesPerSecond)}/s`;
-    message += ` - 已下载 ${progressObj.percent.toFixed(1)}%`;
-    message += ` (${formatBytes(progressObj.transferred)} / ${formatBytes(progressObj.total)})`;
-    console.log(message);
+    const speed = formatBytes(progressObj.bytesPerSecond) + '/s';
+    const transferred = formatBytes(progressObj.transferred);
+    const total = formatBytes(progressObj.total);
     
-    // 可以通过 IPC 发送给渲染进程显示进度
+    console.log(`下载进度: ${progressObj.percent.toFixed(1)}% - ${speed}`);
+    
+    // 更新进度窗口
+    updateProgress(progressObj.percent, transferred, total, speed);
+    
+    // 任务栏进度条
     if (mainWindow) {
       mainWindow.setProgressBar(progressObj.percent / 100);
     }
@@ -60,6 +116,8 @@ function setupAutoUpdater() {
 
   // 更新下载完成
   autoUpdater.on('update-downloaded', (info) => {
+    closeProgressWindow();
+    
     if (mainWindow) {
       mainWindow.setProgressBar(-1); // 清除进度条
     }
@@ -74,15 +132,33 @@ function setupAutoUpdater() {
       cancelId: 1
     }).then((result) => {
       if (result.response === 0) {
-        autoUpdater.quitAndInstall();
+        // 先清理子进程，再安装更新
+        console.log('准备安装更新，先清理子进程...');
+        cleanup();
+        // 等待进程清理完成
+        setTimeout(() => {
+          autoUpdater.quitAndInstall();
+        }, 1000);
       }
     });
   });
 
   // 更新错误
   autoUpdater.on('error', (err) => {
-    console.error('更新检查失败:', err);
-    // 不显示错误对话框，避免打扰用户
+    console.error('更新失败:', err);
+    closeProgressWindow();
+    
+    if (mainWindow) {
+      mainWindow.setProgressBar(-1);
+    }
+    
+    dialog.showMessageBox(mainWindow, {
+      type: 'error',
+      title: '更新失败',
+      message: '下载更新时发生错误',
+      detail: err.message || '请检查网络连接后重试',
+      buttons: ['确定']
+    });
   });
 }
 
@@ -407,27 +483,45 @@ function startFrontend() {
   });
 }
 
-// 清理进程 - 使用进程名确保彻底清理
+// 清理进程 - 双保险：按PID和按端口都清理
 function cleanup() {
   console.log('Cleaning up processes...');
   
   if (process.platform === 'win32') {
-    // Windows: 使用 taskkill 按进程名杀死
-    try {
-      // 杀死后端进程
-      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
-    } catch (e) {
-      // 进程可能不存在，忽略错误
+    // 方式1: 按进程引用清理（如果有）
+    if (backendProcess && backendProcess.pid) {
+      try {
+        require('child_process').execSync(`taskkill /F /PID ${backendProcess.pid} /T`, { stdio: 'ignore' });
+        console.log(`已终止后端进程 PID: ${backendProcess.pid}`);
+      } catch (e) {}
     }
-    
-    // 注意：不要杀死所有 node.exe，只杀死我们启动的前端进程
     if (frontendProcess && frontendProcess.pid) {
       try {
         require('child_process').execSync(`taskkill /F /PID ${frontendProcess.pid} /T`, { stdio: 'ignore' });
-      } catch (e) {
-        // 忽略错误
-      }
+        console.log(`已终止前端进程 PID: ${frontendProcess.pid}`);
+      } catch (e) {}
     }
+    
+    // 方式2: 按进程名清理（兜底）
+    try {
+      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
+    } catch (e) {}
+    
+    // 方式3: 按端口清理（双保险）
+    try {
+      require('child_process').execSync(
+        'powershell -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"',
+        { stdio: 'ignore' }
+      );
+    } catch (e) {}
+    try {
+      require('child_process').execSync(
+        'powershell -Command "Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"',
+        { stdio: 'ignore' }
+      );
+    } catch (e) {}
+    
+    console.log('进程清理完成');
   } else {
     // 非 Windows
     if (backendProcess) {
@@ -450,6 +544,37 @@ function cleanup() {
   frontendProcess = null;
 }
 
+// 启动前的强制清理（确保端口可用）
+function forceCleanupBeforeStart() {
+  console.log('启动前强制清理残留进程...');
+  
+  if (process.platform === 'win32') {
+    // 清理所有可能占用端口的进程
+    try {
+      // 清理 backend.exe
+      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
+    } catch (e) {}
+    
+    // 清理占用 8000 端口的进程
+    try {
+      require('child_process').execSync(
+        'powershell -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"',
+        { stdio: 'ignore' }
+      );
+    } catch (e) {}
+    
+    // 清理占用 3000 端口的进程
+    try {
+      require('child_process').execSync(
+        'powershell -Command "Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"',
+        { stdio: 'ignore' }
+      );
+    } catch (e) {}
+  }
+  
+  console.log('启动前清理完成');
+}
+
 // 检查端口是否被占用
 function checkPort(port) {
   return new Promise((resolve) => {
@@ -469,67 +594,156 @@ function checkPort(port) {
   });
 }
 
+// 获取占用端口的进程信息
+function getPortProcess(port) {
+  try {
+    const result = require('child_process').execSync(
+      `netstat -ano | findstr :${port} | findstr LISTENING`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+    );
+    const lines = result.trim().split('\n');
+    if (lines.length > 0) {
+      const parts = lines[0].trim().split(/\s+/);
+      const pid = parts[parts.length - 1];
+      if (pid && !isNaN(parseInt(pid))) {
+        try {
+          const taskInfo = require('child_process').execSync(
+            `tasklist /FI "PID eq ${pid}" /FO CSV /NH`,
+            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+          );
+          const match = taskInfo.match(/"([^"]+)"/);
+          return { pid: parseInt(pid), name: match ? match[1] : 'unknown' };
+        } catch (e) {
+          return { pid: parseInt(pid), name: 'unknown' };
+        }
+      }
+    }
+  } catch (e) {
+    // 没有找到占用进程
+  }
+  return null;
+}
+
+// 强制终止占用端口的进程
+function killPortProcess(port) {
+  try {
+    // 使用 PowerShell 获取并终止进程（更可靠）
+    require('child_process').execSync(
+      `powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
+      { stdio: 'ignore' }
+    );
+    return true;
+  } catch (e) {
+    // 备用方案：使用 netstat + taskkill
+    try {
+      require('child_process').execSync(
+        `FOR /F "tokens=5" %P IN ('netstat -ano ^| findstr :${port} ^| findstr LISTENING') DO taskkill /F /PID %P`,
+        { shell: 'cmd.exe', stdio: 'ignore' }
+      );
+      return true;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
 // 清理占用端口的旧进程
 async function cleanupOldProcesses() {
   console.log('检查端口占用情况...');
   
-  const port8000InUse = await checkPort(8000);
-  const port3000InUse = await checkPort(3000);
+  // 启动时先强制清理一遍（双保险第一层）
+  forceCleanupBeforeStart();
+  await new Promise(resolve => setTimeout(resolve, 1000));
   
-  if (port8000InUse || port3000InUse) {
-    console.log(`端口被占用: 8000=${port8000InUse}, 3000=${port3000InUse}`);
-    console.log('尝试清理旧进程...');
+  const ports = [8000, 3000];
+  const maxRetries = 3;
+  
+  for (let retry = 0; retry < maxRetries; retry++) {
+    const portStatus = {};
+    let allClear = true;
     
-    try {
-      // 杀死可能残留的后端进程
-      require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
-    } catch (e) {
-      // 忽略错误
+    for (const port of ports) {
+      const inUse = await checkPort(port);
+      if (inUse) {
+        const proc = getPortProcess(port);
+        portStatus[port] = proc;
+        allClear = false;
+        console.log(`端口 ${port} 被占用: ${proc ? `${proc.name} (PID: ${proc.pid})` : '未知进程'}`);
+      }
     }
     
-    // 等待进程完全退出
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (allClear) {
+      console.log('所有端口可用');
+      return true;
+    }
     
-    // 再次检查
-    const stillInUse8000 = await checkPort(8000);
-    const stillInUse3000 = await checkPort(3000);
-    
-    if (stillInUse8000 || stillInUse3000) {
-      // 如果仍然被占用，可能是其他程序
-      const msg = [];
-      if (stillInUse8000) msg.push('8000');
-      if (stillInUse3000) msg.push('3000');
+    // 第一次自动尝试清理
+    if (retry < maxRetries - 1) {
+      console.log(`尝试自动清理端口 (第 ${retry + 1} 次)...`);
       
-      const result = await dialog.showMessageBox({
-        type: 'warning',
-        title: '端口被占用',
-        message: `端口 ${msg.join(' 和 ')} 被其他程序占用`,
-        detail: '这可能是因为：\n1. 上次程序没有正常关闭\n2. 有其他程序正在使用这些端口\n\n点击"强制清理"尝试释放端口，或"退出"手动处理。',
-        buttons: ['强制清理', '退出'],
-        defaultId: 0,
-        cancelId: 1
-      });
+      // 先尝试杀死已知的进程名
+      try {
+        require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
+      } catch (e) {}
       
-      if (result.response === 0) {
-        // 强制清理 - 杀掉占用这些端口的进程
-        try {
-          if (stillInUse8000) {
-            require('child_process').execSync('FOR /F "tokens=5" %P IN (\'netstat -ano ^| findstr :8000 ^| findstr LISTENING\') DO taskkill /F /PID %P', { shell: 'cmd.exe', stdio: 'ignore' });
-          }
-          if (stillInUse3000) {
-            require('child_process').execSync('FOR /F "tokens=5" %P IN (\'netstat -ano ^| findstr :3000 ^| findstr LISTENING\') DO taskkill /F /PID %P', { shell: 'cmd.exe', stdio: 'ignore' });
-          }
-        } catch (e) {
-          console.log('强制清理失败:', e.message);
-        }
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } else {
-        return false; // 用户选择退出
+      // 针对每个被占用的端口进行清理
+      for (const port of Object.keys(portStatus)) {
+        killPortProcess(parseInt(port));
       }
+      
+      // 等待进程退出
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      continue;
+    }
+    
+    // 最后一次仍然失败，询问用户
+    const occupiedPorts = Object.entries(portStatus)
+      .map(([port, proc]) => `端口 ${port}: ${proc ? `${proc.name} (PID: ${proc.pid})` : '未知进程'}`)
+      .join('\n');
+    
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: '端口被占用',
+      message: '以下端口被其他程序占用：',
+      detail: `${occupiedPorts}\n\n可能原因：\n1. 上次程序没有正常关闭\n2. 其他程序正在使用这些端口\n\n点击"强制清理"再次尝试，或"退出"手动处理。`,
+      buttons: ['强制清理', '退出'],
+      defaultId: 0,
+      cancelId: 1
+    });
+    
+    if (result.response === 0) {
+      // 用户选择强制清理
+      for (const port of Object.keys(portStatus)) {
+        killPortProcess(parseInt(port));
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // 最终检查
+      let finalCheck = true;
+      for (const port of ports) {
+        if (await checkPort(port)) {
+          finalCheck = false;
+          console.log(`端口 ${port} 仍然被占用`);
+        }
+      }
+      
+      if (!finalCheck) {
+        await dialog.showMessageBox({
+          type: 'error',
+          title: '端口清理失败',
+          message: '无法释放被占用的端口',
+          detail: '请手动关闭占用端口的程序后重试，或重启电脑。',
+          buttons: ['确定']
+        });
+        return false;
+      }
+      return true;
+    } else {
+      return false; // 用户选择退出
     }
   }
   
-  console.log('端口检查完成，可以启动服务');
+  console.log('端口检查完成');
   return true;
 }
 

@@ -38,7 +38,7 @@ async def get_dashboard(
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
     
-    # 今日销售
+    # 今日销售（使用业务日期 order_date 筛选）
     today_sales_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -46,14 +46,14 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.completed_at >= today_start
+            BusinessOrder.order_date >= today_start
         )
     )
     today_sales_row = today_sales_result.first()
     today_sales = float(today_sales_row[0]) if today_sales_row else 0
     today_sales_count = int(today_sales_row[1]) if today_sales_row else 0
     
-    # 今日采购
+    # 今日采购（使用业务日期 order_date 筛选）
     today_purchase_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -61,7 +61,7 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "purchase",
             BusinessOrder.status == "completed",
-            BusinessOrder.completed_at >= today_start
+            BusinessOrder.order_date >= today_start
         )
     )
     today_purchase_row = today_purchase_result.first()
@@ -86,7 +86,7 @@ async def get_dashboard(
     )
     today_paid = float(today_paid_result.scalar() or 0)
     
-    # 本月销售
+    # 本月销售（使用业务日期 order_date 筛选）
     month_sales_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -94,14 +94,14 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.completed_at >= month_start
+            BusinessOrder.order_date >= month_start
         )
     )
     month_sales_row = month_sales_result.first()
     month_sales = float(month_sales_row[0]) if month_sales_row else 0
     month_sales_count = int(month_sales_row[1]) if month_sales_row else 0
     
-    # 本月采购
+    # 本月采购（使用业务日期 order_date 筛选）
     month_purchase_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -109,21 +109,21 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "purchase",
             BusinessOrder.status == "completed",
-            BusinessOrder.completed_at >= month_start
+            BusinessOrder.order_date >= month_start
         )
     )
     month_purchase_row = month_purchase_result.first()
     month_purchase = float(month_purchase_row[0]) if month_purchase_row else 0
     month_purchase_count = int(month_purchase_row[1]) if month_purchase_row else 0
     
-    # 本月利润（从订单明细中计算）
+    # 本月利润（使用业务日期 order_date 筛选）
     month_profit_result = await db.execute(
         select(func.coalesce(func.sum(OrderItem.profit), 0)).join(
             BusinessOrder, OrderItem.order_id == BusinessOrder.id
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.completed_at >= month_start
+            BusinessOrder.order_date >= month_start
         )
     )
     month_profit = float(month_profit_result.scalar() or 0)
@@ -207,7 +207,7 @@ async def get_dashboard(
         for o in recent_orders_result.scalars().all()
     ]
     
-    # 销售趋势（最近7天）
+    # 销售趋势（最近7天，使用业务日期 order_date）
     sales_trend = []
     for i in range(6, -1, -1):
         day = now - timedelta(days=i)
@@ -218,8 +218,8 @@ async def get_dashboard(
             select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
                 BusinessOrder.order_type == "sale",
                 BusinessOrder.status == "completed",
-                BusinessOrder.completed_at >= day_start,
-                BusinessOrder.completed_at < day_end
+                BusinessOrder.order_date >= day_start,
+                BusinessOrder.order_date < day_end
             )
         )
         sales_trend.append({
@@ -264,10 +264,11 @@ async def get_sales_statistics(
         BusinessOrder.status == "completed"
     ]
     
+    # 使用业务日期（order_date）筛选，而非完成时间
     if start_date:
-        conditions.append(BusinessOrder.completed_at >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.completed_at <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     items = []
     
@@ -341,19 +342,19 @@ async def get_sales_statistics(
             ))
     
     else:
-        # 按日期统计
+        # 按日期统计（使用业务日期 order_date）
         result = await db.execute(
             select(
-                func.date(BusinessOrder.completed_at).label("date"),
+                func.date(BusinessOrder.order_date).label("date"),
                 func.count(BusinessOrder.id).label("order_count"),
                 func.coalesce(func.sum(BusinessOrder.total_quantity), 0).label("total_quantity"),
                 func.coalesce(func.sum(BusinessOrder.final_amount), 0).label("total_amount")
             ).where(
                 and_(*conditions)
             ).group_by(
-                func.date(BusinessOrder.completed_at)
+                func.date(BusinessOrder.order_date)
             ).order_by(
-                func.date(BusinessOrder.completed_at).desc()
+                func.date(BusinessOrder.order_date).desc()
             ).limit(limit)
         )
         
@@ -401,10 +402,11 @@ async def get_purchase_statistics(
         BusinessOrder.status == "completed"
     ]
     
+    # 使用业务日期（order_date）筛选，而非完成时间
     if start_date:
-        conditions.append(BusinessOrder.completed_at >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.completed_at <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     items = []
     
@@ -469,19 +471,19 @@ async def get_purchase_statistics(
             ))
     
     else:
-        # 按日期统计
+        # 按日期统计（使用业务日期 order_date）
         result = await db.execute(
             select(
-                func.date(BusinessOrder.completed_at).label("date"),
+                func.date(BusinessOrder.order_date).label("date"),
                 func.count(BusinessOrder.id).label("order_count"),
                 func.coalesce(func.sum(BusinessOrder.total_quantity), 0).label("total_quantity"),
                 func.coalesce(func.sum(BusinessOrder.final_amount), 0).label("total_amount")
             ).where(
                 and_(*conditions)
             ).group_by(
-                func.date(BusinessOrder.completed_at)
+                func.date(BusinessOrder.order_date)
             ).order_by(
-                func.date(BusinessOrder.completed_at).desc()
+                func.date(BusinessOrder.order_date).desc()
             ).limit(limit)
         )
         
@@ -642,10 +644,11 @@ async def get_entity_rank(
         BusinessOrder.status == "completed"
     ]
     
+    # 使用业务日期（order_date）筛选，而非完成时间
     if start_date:
-        conditions.append(BusinessOrder.completed_at >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.completed_at <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     result = await db.execute(
         select(
@@ -696,13 +699,13 @@ async def get_entity_trading(
     if not entity:
         return {"error": "Entity not found"}
     
-    # 构建日期条件
+    # 构建日期条件（使用业务日期 order_date）
     date_conditions = []
     if start_date:
-        date_conditions.append(BusinessOrder.completed_at >= datetime.strptime(start_date, "%Y-%m-%d"))
+        date_conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
         end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        date_conditions.append(BusinessOrder.completed_at < end_dt)
+        date_conditions.append(BusinessOrder.order_date < end_dt)
     
     # 销售统计（作为客户：target_id = entity_id）
     sales_conditions = [
@@ -854,7 +857,7 @@ async def get_entity_trading(
                 (BusinessOrder.target_id == entity_id) | (BusinessOrder.source_id == entity_id),
                 *date_conditions
             )
-        ).order_by(BusinessOrder.completed_at.desc()).limit(20)
+        ).order_by(BusinessOrder.order_date.desc()).limit(20)
     )
     
     recent_orders = [
@@ -865,7 +868,7 @@ async def get_entity_trading(
             "type_display": o.type_display,
             "quantity": float(o.total_quantity or 0),
             "amount": float(o.final_amount or 0),
-            "date": o.completed_at.strftime("%Y-%m-%d") if o.completed_at else ""
+            "date": o.order_date.strftime("%Y-%m-%d") if o.order_date else ""
         }
         for o in recent_orders_result.scalars().all()
     ]
@@ -915,10 +918,11 @@ async def get_product_rank(
         BusinessOrder.status == "completed"
     ]
     
+    # 使用业务日期（order_date）筛选，而非完成时间
     if start_date:
-        conditions.append(BusinessOrder.completed_at >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.completed_at <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     order_field = func.sum(OrderItem.profit) if rank_type == "profit" else func.sum(OrderItem.quantity)
     
@@ -956,4 +960,137 @@ async def get_product_rank(
     ]
     
     return ProductRankResponse(items=items, rank_type=rank_type)
+
+
+@router.get("/product-trading")
+async def get_product_trading(
+    *,
+    db: AsyncSession = Depends(get_db),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None)
+) -> Any:
+    """
+    获取商品进销统计
+    包含：采购数量/金额、销售数量/金额、库存、毛利
+    """
+    # 基础条件
+    date_conditions = []
+    if start_date:
+        date_conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
+    if end_date:
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        date_conditions.append(BusinessOrder.order_date < end_dt)
+    
+    # 查询所有商品
+    product_query = select(Product).where(Product.is_active == True)
+    if category_id:
+        product_query = product_query.where(Product.category_id == category_id)
+    if search:
+        product_query = product_query.where(
+            (Product.name.contains(search)) | (Product.code.contains(search))
+        )
+    product_query = product_query.order_by(Product.code)
+    
+    products_result = await db.execute(product_query)
+    products = products_result.scalars().all()
+    
+    items = []
+    total_purchase_qty = 0
+    total_purchase_amt = Decimal("0")
+    total_sale_qty = 0
+    total_sale_amt = Decimal("0")
+    total_profit = Decimal("0")
+    total_stock = Decimal("0")
+    
+    for product in products:
+        # 采购统计
+        purchase_conditions = [
+            BusinessOrder.order_type == "purchase",
+            BusinessOrder.status == "completed",
+            OrderItem.product_id == product.id,
+            *date_conditions
+        ]
+        purchase_result = await db.execute(
+            select(
+                func.coalesce(func.sum(OrderItem.quantity), 0),
+                func.coalesce(func.sum(OrderItem.amount), 0)
+            ).join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(*purchase_conditions))
+        )
+        purchase_row = purchase_result.first()
+        purchase_qty = int(purchase_row[0]) if purchase_row else 0
+        purchase_amt = Decimal(str(purchase_row[1])) if purchase_row else Decimal("0")
+        
+        # 销售统计
+        sale_conditions = [
+            BusinessOrder.order_type == "sale",
+            BusinessOrder.status == "completed",
+            OrderItem.product_id == product.id,
+            *date_conditions
+        ]
+        sale_result = await db.execute(
+            select(
+                func.coalesce(func.sum(OrderItem.quantity), 0),
+                func.coalesce(func.sum(OrderItem.amount), 0),
+                func.coalesce(func.sum(OrderItem.profit), 0)
+            ).join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(*sale_conditions))
+        )
+        sale_row = sale_result.first()
+        sale_qty = int(sale_row[0]) if sale_row else 0
+        sale_amt = Decimal(str(sale_row[1])) if sale_row else Decimal("0")
+        profit = Decimal(str(sale_row[2])) if sale_row else Decimal("0")
+        
+        # 库存
+        stock_result = await db.execute(
+            select(func.coalesce(func.sum(Stock.quantity), 0))
+            .where(Stock.product_id == product.id)
+        )
+        stock_qty = Decimal(str(stock_result.scalar() or 0))
+        
+        # 只显示有进销记录的商品
+        if purchase_qty > 0 or sale_qty > 0 or stock_qty > 0:
+            items.append({
+                "product_id": product.id,
+                "product_code": product.code,
+                "product_name": product.name,
+                "category_name": product.category or "",
+                "base_unit": product.unit or "个",
+                "purchase_qty": purchase_qty,
+                "purchase_amount": float(purchase_amt),
+                "sale_qty": sale_qty,
+                "sale_amount": float(sale_amt),
+                "profit": float(profit),
+                "profit_rate": round(float(profit / sale_amt * 100), 2) if sale_amt > 0 else 0,
+                "stock_qty": float(stock_qty),
+                "avg_purchase_price": round(float(purchase_amt / purchase_qty), 2) if purchase_qty > 0 else 0,
+                "avg_sale_price": round(float(sale_amt / sale_qty), 2) if sale_qty > 0 else 0,
+            })
+            
+            total_purchase_qty += purchase_qty
+            total_purchase_amt += purchase_amt
+            total_sale_qty += sale_qty
+            total_sale_amt += sale_amt
+            total_profit += profit
+            total_stock += stock_qty
+    
+    return {
+        "items": items,
+        "summary": {
+            "total_products": len(items),
+            "total_purchase_qty": total_purchase_qty,
+            "total_purchase_amount": float(total_purchase_amt),
+            "total_sale_qty": total_sale_qty,
+            "total_sale_amount": float(total_sale_amt),
+            "total_profit": float(total_profit),
+            "total_profit_rate": round(float(total_profit / total_sale_amt * 100), 2) if total_sale_amt > 0 else 0,
+            "total_stock": float(total_stock)
+        },
+        "date_range": {
+            "start_date": start_date,
+            "end_date": end_date
+        }
+    }
 

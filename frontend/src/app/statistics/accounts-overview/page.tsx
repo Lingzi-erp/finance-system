@@ -72,14 +72,10 @@ export default function AccountsOverviewPage() {
                 <Wallet className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">往来账款</h1>
-                <p className="text-emerald-100 text-sm">应收账款 · 应付账款 · 往来汇总</p>
+                <h1 className="text-xl font-bold">快捷对账</h1>
+                <p className="text-emerald-100 text-sm">应收应付 · 客商汇总 · 快速查询</p>
               </div>
             </div>
-            <Button onClick={loadData} variant="secondary" size="sm" disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
           </div>
         </div>
       </div>

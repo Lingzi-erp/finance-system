@@ -38,13 +38,13 @@ const navGroups = [
     items: [
       { href: "/accounts", label: "往来账款", icon: Receipt, description: "应收应付管理" },
       { href: "/payments", label: "资金流水", icon: CreditCard, description: "收款付款记录" },
-      { href: "/payment-methods", label: "收付方式", icon: Wallet, description: "银行卡/微信/支付宝" },
     ]
   },
 ];
 
 // 系统设置子链接
 const systemLinks = [
+  { href: "/initial-data", label: "期初数据", icon: Database, description: "期初库存与账款" },
   { href: "/backup", label: "数据备份", icon: Database, description: "备份与数据恢复" },
   { href: "/system", label: "系统维护", icon: Settings, description: "系统设置与维护" },
 ];

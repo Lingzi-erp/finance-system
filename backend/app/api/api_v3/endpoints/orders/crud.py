@@ -73,7 +73,8 @@ async def list_orders(
     total_result = await db.execute(count_query)
     total = total_result.scalar()
     
-    query = query.order_by(BusinessOrder.created_at.desc())
+    # 按业务日期（装货/卸货日期）排序，而非系统创建时间
+    query = query.order_by(BusinessOrder.order_date.desc())
     query = query.offset((page - 1) * limit).limit(limit)
     
     result = await db.execute(query)
@@ -102,17 +103,29 @@ async def create_order(
     
     order_no = await generate_order_no(db, order_in.order_type)
     
+    # 业务日期根据订单类型自动设置：
+    # - 采购单：卸货日期（入库日期）
+    # - 销售单：装货日期（出库日期）
+    # - 其他：优先使用卸货日期，否则装货日期
+    if order_in.order_type == "purchase":
+        business_date = order_in.unloading_date or order_in.order_date or datetime.utcnow()
+    elif order_in.order_type == "sale":
+        business_date = order_in.loading_date or order_in.order_date or datetime.utcnow()
+    else:
+        business_date = order_in.unloading_date or order_in.loading_date or order_in.order_date or datetime.utcnow()
+    
     order = BusinessOrder(
         order_no=order_no,
         order_type=order_in.order_type,
         status="draft",
         source_id=order_in.source_id,
         target_id=order_in.target_id,
-        order_date=order_in.order_date or datetime.utcnow(),
+        order_date=business_date,
         loading_date=order_in.loading_date,
         unloading_date=order_in.unloading_date,
         total_discount=Decimal(str(order_in.total_discount)),
         total_storage_fee=Decimal(str(order_in.total_storage_fee)),
+        calculate_storage_fee=order_in.calculate_storage_fee,
         notes=order_in.notes,
         created_by=1
     )

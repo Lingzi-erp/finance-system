@@ -652,8 +652,9 @@ async def create_batch_from_purchase(
         # 运费/仓储费
         freight_cost=freight_cost or Decimal("0"),
         storage_rate=storage_rate or Decimal("0"),
-        storage_start_date=datetime.utcnow(),
-        received_at=datetime.utcnow(),
+        # 使用卸货日期作为入库日期和仓储起算日期（业务日期）
+        storage_start_date=order.unloading_date or datetime.utcnow(),
+        received_at=order.unloading_date or datetime.utcnow(),
         notes=f"采购入库 - {order.order_no}",
         created_by=operator_id)
     db.add(batch)

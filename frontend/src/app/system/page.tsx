@@ -22,9 +22,15 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.1.3';
 const BUILD_DATE = '2024-12-06';
 const CHANGELOG = [
+  { version: '1.1.3', date: '2024-12-06', changes: ['双保险进程清理：启动前+关闭时', '更新安装前先清理子进程', '优化端口释放可靠性'] },
+  { version: '1.1.2', date: '2024-12-06', changes: ['优化端口占用检测', '显示占用端口的进程信息', '自动重试清理机制'] },
+  { version: '1.1.1', date: '2024-12-06', changes: ['修复更新进度窗口不显示的问题', '修复初始化演示数据失败的问题', '修复数据库迁移问题'] },
+  { version: '1.1.0', date: '2024-12-06', changes: ['冷藏费改为可选（用户可选择是否计算）', '冷藏费规则改为每吨15元', '车牌号改为选填', '商品进销统计只显示重量'] },
+  { version: '1.0.10', date: '2024-12-06', changes: ['新增更新下载进度窗口', '修复更新下载无反馈的问题', '优化更新错误提示'] },
+  { version: '1.0.9', date: '2024-12-06', changes: ['统一全部表格居中对齐样式', '修复部分页面表格错位问题', '移除冗余的刷新和重算按钮'] },
   { version: '1.0.8', date: '2024-12-06', changes: ['销售单来源支持供应商直发', '货物可不经仓库直接从供应商发往客户'] },
   { version: '1.0.7', date: '2024-12-06', changes: ['新增启动时端口检测', '自动清理残留进程', '防止端口占用导致启动失败'] },
   { version: '1.0.6', date: '2024-12-06', changes: ['更新日志默认只显示最新版本', '优化更新日志展示体验'] },
@@ -144,6 +150,7 @@ export default function SystemPage() {
     }
   ];
 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -171,7 +178,7 @@ export default function SystemPage() {
           </div>
         </div>
 
-        {/* 操作卡片 */}
+        {/* 演示数据操作卡片 */}
         <div className="space-y-4">
           {actions.map(action => (
             <div 

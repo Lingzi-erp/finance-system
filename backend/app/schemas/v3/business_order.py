@@ -131,6 +131,7 @@ class BusinessOrderBase(BaseModel):
     total_discount: float = Field(default=0, ge=0, description="总折扣")
     total_shipping: float = Field(default=0, ge=0, description="总运费")
     total_storage_fee: float = Field(default=0, ge=0, description="总冷藏费")
+    calculate_storage_fee: bool = Field(default=True, description="是否计算冷藏费")
     notes: Optional[str] = Field(None, description="备注")
 
 
@@ -149,6 +150,7 @@ class BusinessOrderUpdate(BaseModel):
     total_discount: Optional[float] = None
     total_shipping: Optional[float] = None
     total_storage_fee: Optional[float] = None
+    calculate_storage_fee: Optional[bool] = None
     notes: Optional[str] = None
     items: Optional[List[OrderItemCreate]] = None
 

@@ -22,10 +22,15 @@ router = APIRouter()
 
 def build_account_response(account: AccountBalance) -> AccountBalanceResponse:
     """构建账款响应"""
+    # 业务日期：优先使用关联订单的业务日期，期初数据使用创建时间
+    business_date = account.created_at
+    if account.order:
+        business_date = account.order.order_date or account.created_at
+    
     return AccountBalanceResponse(
         id=account.id,
         entity_id=account.entity_id,
-        order_id=account.order_id,
+        order_id=account.order_id,  # 可能为 None（期初数据）
         balance_type=account.balance_type,
         amount=float(account.amount or 0),
         paid_amount=float(account.paid_amount or 0),
@@ -33,11 +38,13 @@ def build_account_response(account: AccountBalance) -> AccountBalanceResponse:
         due_date=account.due_date,
         status=account.status,
         notes=account.notes,
+        is_initial=account.is_initial or False,  # 是否为期初数据
         type_display=account.type_display,
         status_display=account.status_display,
         entity_name=account.entity.name if account.entity else "",
         entity_code=account.entity.code if account.entity else "",
         order_no=account.order.order_no if account.order else "",
+        business_date=business_date,  # 业务日期
         created_by=account.created_by,
         creator_name=account.creator.username if account.creator else "",
         created_at=account.created_at,
@@ -53,12 +60,19 @@ async def list_accounts(
     balance_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     entity_id: Optional[int] = Query(None),
-    search: Optional[str] = Query(None)) -> Any:
+    search: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD")) -> Any:
     """获取账款列表"""
-    query = select(AccountBalance).options(
-        selectinload(AccountBalance.entity),
-        selectinload(AccountBalance.order),
-        selectinload(AccountBalance.creator)
+    # 使用 join 来支持按订单业务日期筛选
+    query = (
+        select(AccountBalance)
+        .join(BusinessOrder, AccountBalance.order_id == BusinessOrder.id, isouter=True)
+        .options(
+            selectinload(AccountBalance.entity),
+            selectinload(AccountBalance.order),
+            selectinload(AccountBalance.creator)
+        )
     )
     
     conditions = []
@@ -69,18 +83,31 @@ async def list_accounts(
     if entity_id:
         conditions.append(AccountBalance.entity_id == entity_id)
     
+    # 日期筛选：使用订单业务日期，期初数据使用创建时间
+    if start_date:
+        conditions.append(
+            func.coalesce(BusinessOrder.order_date, AccountBalance.created_at) >= datetime.strptime(start_date, "%Y-%m-%d")
+        )
+    if end_date:
+        conditions.append(
+            func.coalesce(BusinessOrder.order_date, AccountBalance.created_at) <= datetime.strptime(end_date, "%Y-%m-%d")
+        )
+    
     if conditions:
         query = query.where(and_(*conditions))
     
     # 计算总数
-    count_query = select(func.count(AccountBalance.id))
+    count_query = (
+        select(func.count(AccountBalance.id))
+        .join(BusinessOrder, AccountBalance.order_id == BusinessOrder.id, isouter=True)
+    )
     if conditions:
         count_query = count_query.where(and_(*conditions))
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
     
-    # 分页查询
-    query = query.order_by(AccountBalance.created_at.desc())
+    # 分页查询，按业务日期排序
+    query = query.order_by(func.coalesce(BusinessOrder.order_date, AccountBalance.created_at).desc())
     query = query.offset((page - 1) * limit).limit(limit)
     
     result = await db.execute(query)
@@ -591,20 +618,34 @@ async def get_entity_statement(
         raise HTTPException(status_code=404, detail="实体不存在")
     
     # 查询该实体相关的所有账款记录
-    account_query = select(AccountBalance).options(
-        selectinload(AccountBalance.order),
-        selectinload(AccountBalance.payments)
-    ).where(
-        AccountBalance.entity_id == entity_id,
-        AccountBalance.status != "cancelled"
+    # 日期筛选使用关联订单的业务日期（order_date），而非账款创建时间
+    account_query = (
+        select(AccountBalance)
+        .join(BusinessOrder, AccountBalance.order_id == BusinessOrder.id, isouter=True)
+        .options(
+            selectinload(AccountBalance.order),
+            selectinload(AccountBalance.payments)
+        )
+        .where(
+            AccountBalance.entity_id == entity_id,
+            AccountBalance.status != "cancelled"
+        )
     )
     
     if start_date:
-        account_query = account_query.where(AccountBalance.created_at >= start_date)
+        # 使用订单业务日期筛选，期初数据使用账款创建时间
+        account_query = account_query.where(
+            func.coalesce(BusinessOrder.order_date, AccountBalance.created_at) >= start_date
+        )
     if end_date:
-        account_query = account_query.where(AccountBalance.created_at <= end_date)
+        account_query = account_query.where(
+            func.coalesce(BusinessOrder.order_date, AccountBalance.created_at) <= end_date
+        )
     
-    account_query = account_query.order_by(AccountBalance.created_at)
+    # 按业务日期排序
+    account_query = account_query.order_by(
+        func.coalesce(BusinessOrder.order_date, AccountBalance.created_at)
+    )
     
     result = await db.execute(account_query)
     accounts = result.scalars().unique().all()
@@ -615,12 +656,15 @@ async def get_entity_statement(
     running_payable = Decimal("0")
     
     for account in accounts:
+        # 业务日期：优先使用订单业务日期，期初数据使用创建时间
+        business_date = account.order.order_date if account.order else account.created_at
+        
         # 业务单发生
         item = {
-            "date": account.created_at.strftime("%Y-%m-%d"),
+            "date": business_date.strftime("%Y-%m-%d"),
             "type": "order",
-            "ref_no": account.order.order_no if account.order else "",
-            "description": f"{'销售' if account.balance_type == 'receivable' else '采购'}单",
+            "ref_no": account.order.order_no if account.order else "期初",
+            "description": f"{'销售' if account.balance_type == 'receivable' else '采购'}单" if account.order else "期初余额",
             "debit": float(account.amount) if account.balance_type == "receivable" else 0,  # 应收增加
             "credit": float(account.amount) if account.balance_type == "payable" else 0,  # 应付增加
             "receivable_balance": 0,
@@ -636,10 +680,10 @@ async def get_entity_statement(
         item["payable_balance"] = float(running_payable)
         statement_items.append(item)
         
-        # 收付款记录
+        # 收付款记录 - 使用实际付款日期
         for payment in account.payments:
             pay_item = {
-                "date": payment.created_at.strftime("%Y-%m-%d"),
+                "date": (payment.payment_date or payment.created_at).strftime("%Y-%m-%d"),
                 "type": "payment",
                 "ref_no": f"PAY-{payment.id}",
                 "description": f"{'收款' if account.balance_type == 'receivable' else '付款'} ({payment.payment_method_display})",

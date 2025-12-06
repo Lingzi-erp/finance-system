@@ -114,10 +114,6 @@ export default function FormulasPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={loadFormulas} disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
             <Button onClick={() => setShowAdd(true)}>
               <Plus className="w-4 h-4 mr-2" />
               添加公式
@@ -221,7 +217,7 @@ export default function FormulasPage() {
                   <th>参数</th>
                   <th>计算公式</th>
                   <th>描述</th>
-                  <th className="w-20">操作</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>

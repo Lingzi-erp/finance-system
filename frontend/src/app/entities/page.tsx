@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 import { entitiesApi, Entity } from '@/lib/api/v3';
-import { Building2, Plus, Search, Edit, Trash2, X, Warehouse, Users, Truck, Car } from 'lucide-react';
+import { Building2, Plus, Search, Edit, Trash2, X, Warehouse, Users, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -270,13 +270,6 @@ export default function EntitiesPage() {
               
               <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
                 <div className="flex gap-1">
-                  {entity.entity_type.includes('logistics') && (
-                    <Link href={`/entities/${entity.id}/vehicles`}>
-                      <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 hover:bg-blue-50" title="车辆管理">
-                        <Car className="w-4 h-4" />
-                      </Button>
-                    </Link>
-                  )}
                   {canEdit && (
                     <Button variant="ghost" size="sm" onClick={() => handleEdit(entity)}>
                       <Edit className="w-4 h-4" />

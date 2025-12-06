@@ -317,10 +317,6 @@ export default function BatchesPage() {
               <label htmlFor="hasStock" className="text-sm text-slate-600">只看有库存</label>
             </div>
             
-            <Button variant="outline" onClick={() => loadBatches(true)} disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
           </div>
         </div>
         
@@ -353,11 +349,11 @@ export default function BatchesPage() {
                     <th>批次号</th>
                     <th>商品</th>
                     <th>仓库</th>
-                    <th className="text-right">当前/初始</th>
-                    <th className="text-right">采购价</th>
-                    <th className="text-center">仓储天数</th>
-                    <th className="text-center">状态</th>
-                    <th className="w-12"></th>
+                    <th>当前/初始</th>
+                    <th>采购价</th>
+                    <th>仓储天数</th>
+                    <th>状态</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -383,7 +379,7 @@ export default function BatchesPage() {
                             {batch.storage_entity_name}
                           </div>
                         </td>
-                        <td className="text-right">
+                        <td>
                           {(() => {
                             const cu = parseCompositeUnit(batch.product_unit);
                             if (cu && cu.quantity > 1) {
@@ -414,21 +410,21 @@ export default function BatchesPage() {
                             );
                           })()}
                         </td>
-                        <td className="text-right font-mono text-slate-600">
+                        <td className="font-mono text-slate-600">
                           {formatCurrency(batch.cost_price)}
                         </td>
-                        <td className="text-center">
+                        <td>
                           <div className="flex items-center justify-center gap-1 text-slate-600">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             <span>{batch.storage_days}</span>
                           </div>
                         </td>
-                        <td className="text-center">
+                        <td>
                           <span className={`badge ${BATCH_STATUS_MAP[batch.status]?.color || 'badge-neutral'}`}>
                             {batch.status_display}
                           </span>
                         </td>
-                        <td className="text-center">
+                        <td>
                           {expandedId === batch.id ? (
                             <ChevronUp className="w-4 h-4 text-slate-400" />
                           ) : (

@@ -23,6 +23,7 @@ from app.schemas.v3.business_order import (
 from .core import generate_order_no, build_order_response, load_order
 from .stock_ops import handle_stock_changes
 from .account_ops import create_account_balance
+from .storage_fee import update_order_storage_fee
 
 router = APIRouter()
 
@@ -226,6 +227,11 @@ async def change_order_status(
     
     # ===== 库存变动逻辑 =====
     await handle_stock_changes(db, order, action)
+    
+    # ===== 冷藏费自动计算 =====
+    if action == "complete":
+        # 采购单：固定15元，销售单：15 + 每吨每天1.5元
+        await update_order_storage_fee(db, order)
     
     # ===== 应收/应付账款逻辑 =====
     if action == "complete" and trans["to"] == "completed":

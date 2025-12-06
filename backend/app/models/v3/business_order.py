@@ -5,7 +5,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, DECIMAL
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, DECIMAL, Boolean
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -55,6 +55,9 @@ class BusinessOrder(Base):
     
     # 备注
     notes = Column(Text, comment="备注")
+    
+    # 是否计算冷藏费（默认计算）
+    calculate_storage_fee = Column(Boolean, default=True, comment="是否计算冷藏费")
     
     # 关联原单（用于退货单追溯）
     related_order_id = Column(Integer, ForeignKey("v3_business_orders.id"), comment="关联原单ID")
