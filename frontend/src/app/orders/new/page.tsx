@@ -152,14 +152,21 @@ export default function NewOrderPage() {
 
   useEffect(() => { loadBaseData(); }, []);
   
-  // 当选择来源仓库时，加载该仓库的库存（用于销售）
+  // 当销售来源是仓库时，加载该仓库的库存
   useEffect(() => {
     if (orderType === 'sale' && sourceId) {
-      loadWarehouseStocks(sourceId);
+      // 检查来源是否是仓库类型
+      const source = entities.find(e => e.id === sourceId);
+      if (source?.entity_type?.includes('warehouse')) {
+        loadWarehouseStocks(sourceId);
+      } else {
+        // 来源是供应商时，不加载库存
+        setWarehouseStocks([]);
+      }
     } else {
       setWarehouseStocks([]);
     }
-  }, [orderType, sourceId]);
+  }, [orderType, sourceId, entities]);
 
   const loadBaseData = async () => {
     try {
@@ -191,9 +198,17 @@ export default function NewOrderPage() {
   const getSourceOptions = () => {
     switch (orderType) {
       case 'purchase': return entities.filter(e => e.entity_type.includes('supplier'));
-      case 'sale': return entities.filter(e => e.entity_type.includes('warehouse'));
+      // 销售来源可以是仓库（从库存出）或供应商（直发客户）
+      case 'sale': return entities.filter(e => e.entity_type.includes('warehouse') || e.entity_type.includes('supplier'));
       default: return entities;
     }
+  };
+  
+  // 判断销售来源是仓库还是供应商
+  const isSaleFromWarehouse = () => {
+    if (orderType !== 'sale' || !sourceId) return false;
+    const source = entities.find(e => e.id === sourceId);
+    return source?.entity_type?.includes('warehouse') || false;
   };
 
   const getTargetOptions = () => {
@@ -303,8 +318,8 @@ export default function NewOrderPage() {
           newItems[index].pricing_mode = 'weight';
         }
       }
-      // 如果是销售，查找库存信息
-      if (orderType === 'sale') {
+      // 如果是销售且来源是仓库，查找库存信息
+      if (orderType === 'sale' && isSaleFromWarehouse()) {
         const stock = warehouseStocks.find(s => s.product_id === value);
         newItems[index].available_quantity = stock?.available_quantity;
       }
@@ -379,15 +394,16 @@ export default function NewOrderPage() {
     };
   };
 
-  // 获取可选商品列表（销售时仅显示有库存的商品，支持搜索过滤）
+  // 获取可选商品列表（销售时根据来源类型过滤，支持搜索过滤）
   const getAvailableProducts = () => {
     let result = products;
     
-    // 销售时仅返回有库存的商品
-    if (orderType === 'sale') {
+    // 销售且来源是仓库时，仅返回有库存的商品
+    if (orderType === 'sale' && isSaleFromWarehouse()) {
       const stockProductIds = warehouseStocks.map(s => s.product_id);
       result = result.filter(p => stockProductIds.includes(p.id));
     }
+    // 销售来源是供应商时，可选择任意商品（直发，不走库存）
     
     // 搜索过滤
     if (productSearch.trim()) {
@@ -411,9 +427,9 @@ export default function NewOrderPage() {
     return p.name;
   };
   
-  // 获取商品的可用库存
+  // 获取商品的可用库存（仅当销售来源是仓库时有意义）
   const getProductAvailableQuantity = (productId: number): number | undefined => {
-    if (orderType !== 'sale') return undefined;
+    if (orderType !== 'sale' || !isSaleFromWarehouse()) return undefined;
     const stock = warehouseStocks.find(s => s.product_id === productId);
     return stock?.available_quantity;
   };
@@ -426,8 +442,8 @@ export default function NewOrderPage() {
     if (!loadingDate) { toast({ title: '请选择装货日期', variant: 'destructive' }); return; }
     if (!unloadingDate) { toast({ title: '请选择卸货日期', variant: 'destructive' }); return; }
     
-    // 校验库存
-    if (orderType === 'sale') {
+    // 校验库存（仅当销售来源是仓库时）
+    if (orderType === 'sale' && isSaleFromWarehouse()) {
       for (const item of items) {
         const available = getProductAvailableQuantity(item.product_id);
         if (available !== undefined && item.quantity > available) {
@@ -484,7 +500,7 @@ export default function NewOrderPage() {
 
   const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 }).format(amount);
   const getTypeLabel = (type: string) => ({ purchase: '采购单', sale: '销售单' }[type] || type);
-  const getSourceLabel = () => ({ purchase: '供应商', sale: '出库仓库' }[orderType] || '来源');
+  const getSourceLabel = () => ({ purchase: '供应商', sale: '出货方' }[orderType] || '来源');
   const getTargetLabel = () => ({ purchase: '入库仓库', sale: '客户' }[orderType] || '目标');
 
   if (loading) return <div className="flex justify-center items-center h-screen"><p>加载中...</p></div>;
@@ -510,7 +526,30 @@ export default function NewOrderPage() {
         <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">来源与目标</h2>
           <div className="flex items-center gap-4">
-            <div className="flex-1"><label className="text-sm text-slate-700 block mb-1">{getSourceLabel()} *</label><Select value={sourceId.toString()} onValueChange={v => setSourceId(parseInt(v))}><SelectTrigger><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{getSourceOptions().map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="flex-1">
+              <label className="text-sm text-slate-700 block mb-1">{getSourceLabel()} *</label>
+              <Select value={sourceId.toString()} onValueChange={v => { setSourceId(parseInt(v)); setItems([]); }}>
+                <SelectTrigger><SelectValue placeholder="请选择" /></SelectTrigger>
+                <SelectContent>
+                  {getSourceOptions().map(e => (
+                    <SelectItem key={e.id} value={e.id.toString()}>
+                      <div className="flex items-center gap-2">
+                        <span>{e.name}</span>
+                        {orderType === 'sale' && e.entity_type?.includes('warehouse') && (
+                          <span className="text-xs text-blue-500">[仓库]</span>
+                        )}
+                        {orderType === 'sale' && e.entity_type?.includes('supplier') && (
+                          <span className="text-xs text-green-500">[供应商直发]</span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {orderType === 'sale' && (
+                <p className="text-xs text-slate-400 mt-1">可选仓库出库或供应商直发</p>
+              )}
+            </div>
             <ArrowRight className="w-6 h-6 text-slate-500 mt-6" />
             <div className="flex-1"><label className="text-sm text-slate-700 block mb-1">{getTargetLabel()} *</label><Select value={targetId.toString()} onValueChange={v => setTargetId(parseInt(v))}><SelectTrigger><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{getTargetOptions().map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>)}</SelectContent></Select></div>
           </div>
@@ -522,11 +561,14 @@ export default function NewOrderPage() {
               <h2 className="text-lg font-semibold text-slate-900">商品明细</h2>
               {orderType === 'sale' && sourceId > 0 && (
                 <p className="text-xs text-slate-500 mt-1">
-                  {stocksLoading ? '加载库存中...' : warehouseStocks.length === 0 ? '该仓库暂无库存' : `可选 ${warehouseStocks.length} 种商品`}
+                  {isSaleFromWarehouse() 
+                    ? (stocksLoading ? '加载库存中...' : warehouseStocks.length === 0 ? '该仓库暂无库存' : `可选 ${warehouseStocks.length} 种库存商品`)
+                    : '从供应商直发，可选择任意商品'
+                  }
                 </p>
               )}
             </div>
-            <Button size="sm" onClick={addItem} disabled={orderType === 'sale' && warehouseStocks.length === 0}>
+            <Button size="sm" onClick={addItem} disabled={orderType === 'sale' && isSaleFromWarehouse() && warehouseStocks.length === 0}>
               <Plus className="w-4 h-4 mr-1" />添加商品
             </Button>
           </div>

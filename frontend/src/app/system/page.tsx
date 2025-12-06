@@ -22,9 +22,10 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.0.7';
+const APP_VERSION = '1.0.8';
 const BUILD_DATE = '2024-12-06';
 const CHANGELOG = [
+  { version: '1.0.8', date: '2024-12-06', changes: ['销售单来源支持供应商直发', '货物可不经仓库直接从供应商发往客户'] },
   { version: '1.0.7', date: '2024-12-06', changes: ['新增启动时端口检测', '自动清理残留进程', '防止端口占用导致启动失败'] },
   { version: '1.0.6', date: '2024-12-06', changes: ['更新日志默认只显示最新版本', '优化更新日志展示体验'] },
   { version: '1.0.5', date: '2024-12-06', changes: ['修复更新时误弹用户数据确认框的问题'] },
