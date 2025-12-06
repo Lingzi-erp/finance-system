@@ -317,11 +317,24 @@ async def init_demo_data(
             amount=Decimal("1050"), subtotal=Decimal("1050"),
             cost_price=Decimal("25"),  # 成本单价（采购价）
             cost_amount=Decimal("750"),  # 成本金额 = 30 × 25
-            profit=Decimal("300"),  # 利润 = 1050 - 750
+            profit=Decimal("249.46"),  # 利润 = 1050 - 750 - 50(运费) - 0.54(冷藏费)
             logistics_company_id=lg1.id,
-            shipping_cost=Decimal("50")
+            shipping_cost=Decimal("50"),
+            total_storage_fee=Decimal("0.54")
         )
         db.add(soi1)
+        await db.flush()
+        
+        # 创建批次出库记录（用于批次追溯）
+        from app.models.v3.order_item_batch import OrderItemBatch
+        oib1 = OrderItemBatch(
+            order_item_id=soi1.id,
+            batch_id=batch1.id,
+            quantity=Decimal("30"),
+            cost_price=Decimal("25"),
+            cost_amount=Decimal("750")
+        )
+        db.add(oib1)
         
         sof1 = OrderFlow(
             order_id=so1.id, flow_type="created", flow_status="completed",

@@ -466,12 +466,11 @@ export default function BatchesPage() {
                         <tr>
                           <td colSpan={9} className="p-0 bg-slate-50/50">
                             <div className="p-6">
-                              {/* 入库信息（从哪来）*/}
+                              {/* 入库信息 */}
                               <div className="mb-6">
                                 <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-3">
                                   <Truck className="w-4 h-4 text-blue-500" />
                                   <span className="text-blue-600">入库</span>
-                                  <span className="text-slate-400 font-normal">（从哪来）</span>
                                 </h4>
                                 <div className="bg-blue-50/50 rounded-lg p-4 border border-blue-100">
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -523,12 +522,11 @@ export default function BatchesPage() {
                                 </div>
                               </div>
                               
-                              {/* 出库记录（到哪去）*/}
+                              {/* 出库记录 */}
                               <div>
                                 <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-3">
                                   <Package className="w-4 h-4 text-green-500" />
                                   <span className="text-green-600">出库记录</span>
-                                  <span className="text-slate-400 font-normal">（到哪去）</span>
                                   <span className="text-xs text-slate-400 ml-2">
                                     已出 {formatNumber(batch.initial_quantity - batch.current_quantity)} / 剩余 {formatNumber(batch.current_quantity)}
                                   </span>

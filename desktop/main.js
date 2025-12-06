@@ -17,6 +17,9 @@ autoUpdater.logger.transports.file.level = 'info';
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// 增加网络超时时间（GitHub 在国内访问可能较慢）
+process.env.ELECTRON_BUILDER_HTTP_TIMEOUT = '60000'; // 60秒超时
+
 // 下载进度窗口
 let progressWindow = null;
 
@@ -171,10 +174,12 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// 检查更新
-function checkForUpdates(isManual = false) {
+// 检查更新（带重试机制）
+function checkForUpdates(isManual = false, retryCount = 0) {
+  const MAX_RETRIES = 2;
+  
   if (!isDev) {
-    console.log('检查更新...');
+    console.log(`检查更新... ${retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : ''}`);
     autoUpdater.checkForUpdates().then(result => {
       // 如果是手动检查且没有更新，显示提示
       if (isManual && !result.updateInfo) {
@@ -183,6 +188,24 @@ function checkForUpdates(isManual = false) {
           title: '检查更新',
           message: '当前已是最新版本',
           detail: `当前版本: v${app.getVersion()}`,
+          buttons: ['确定']
+        });
+      }
+    }).catch(err => {
+      console.error('检查更新失败:', err.message);
+      // 如果是超时错误且还有重试次数，自动重试
+      if (retryCount < MAX_RETRIES && (err.message.includes('TIMED_OUT') || err.message.includes('ETIMEDOUT') || err.message.includes('network'))) {
+        console.log(`网络超时，${3}秒后重试...`);
+        setTimeout(() => {
+          checkForUpdates(isManual, retryCount + 1);
+        }, 3000);
+      } else if (isManual) {
+        // 手动检查时显示错误
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: '检查更新失败',
+          message: '无法连接到更新服务器',
+          detail: '请检查网络连接后重试。\n\n提示：GitHub 服务器在国内访问可能不稳定，建议稍后再试。',
           buttons: ['确定']
         });
       }
