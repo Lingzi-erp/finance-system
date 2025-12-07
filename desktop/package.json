@@ -91,6 +91,7 @@
       ],
       "signAndEditExecutable": false
     },
+    "artifactName": "finance-system-setup-${version}.${ext}",
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
