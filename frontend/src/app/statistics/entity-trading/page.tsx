@@ -459,8 +459,7 @@ export default function EntityTradingPage() {
                   </h3>
                   <div className="grid grid-cols-5 gap-4">
                     <StatCard icon={FileText} label="订单数" value={`${tradingData.sales.order_count}笔`} color="emerald" />
-                    <StatCard icon={Package} label="件数" value={tradingData.sales.quantity.toLocaleString()} color="emerald" />
-                    <StatCard icon={Scale} label="重量" value={calculateProductsWeight(tradingData.sales.products)} color="emerald" />
+                    <StatCard icon={Scale} label="销售重量" value={calculateProductsWeight(tradingData.sales.products)} color="emerald" />
                     <StatCard icon={DollarSign} label="金额" value={formatMoney(tradingData.sales.amount)} color="emerald" />
                     <StatCard icon={TrendingUp} label="利润" value={formatMoney(tradingData.sales.profit)} subtext={`利润率 ${tradingData.sales.profit_rate}%`} color="emerald" />
                   </div>
@@ -471,8 +470,7 @@ export default function EntityTradingPage() {
                   </h3>
                   <div className="grid grid-cols-4 gap-4">
                     <StatCard icon={FileText} label="订单数" value={`${tradingData.purchase.order_count}笔`} color="orange" />
-                    <StatCard icon={Package} label="件数" value={tradingData.purchase.quantity.toLocaleString()} color="orange" />
-                    <StatCard icon={Scale} label="重量" value={calculateProductsWeight(tradingData.purchase.products)} color="orange" />
+                    <StatCard icon={Scale} label="采购重量" value={calculateProductsWeight(tradingData.purchase.products)} color="orange" />
                     <StatCard icon={DollarSign} label="金额" value={formatMoney(tradingData.purchase.amount)} color="orange" />
                   </div>
                 </div>
@@ -483,12 +481,6 @@ export default function EntityTradingPage() {
                   icon={FileText} 
                   label="订单数" 
                   value={`${currentStats?.order_count || 0}笔`} 
-                  color={entityRole === 'customer' ? 'emerald' : 'orange'} 
-                />
-                <StatCard 
-                  icon={Package} 
-                  label="件数"
-                  value={(currentStats?.quantity || 0).toLocaleString()} 
                   color={entityRole === 'customer' ? 'emerald' : 'orange'} 
                 />
                 {totalWeight !== null && (

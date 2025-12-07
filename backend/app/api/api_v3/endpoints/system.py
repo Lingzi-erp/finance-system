@@ -25,7 +25,7 @@ from app.models.v3.deduction_formula import DeductionFormula
 from app.models.v3.unit import UnitGroup, Unit, CompositeUnit
 from app.models.v3.product_spec import ProductSpec
 from app.models.v3.specification import Specification
-from app.models.v3.order_item_batch import OrderItemBatch
+from app.models.v3.stock_batch import OrderItemBatch
 
 router = APIRouter()
 
@@ -125,11 +125,24 @@ async def init_demo_data(
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         admin_id = 1
         
-        # ========== 2. 创建扣重公式 ==========
+        # ========== 2. 创建扣重公式（硬编码三种） ==========
+        # 注意：percentage 类型的 value 是乘数，0.99 表示扣1%（净重=毛重×0.99）
         formulas = [
-            DeductionFormula(name="标准1%扣重", formula_type="percentage", value=Decimal("1"), is_active=True, created_by=admin_id),
-            DeductionFormula(name="标准2%扣重", formula_type="percentage", value=Decimal("2"), is_active=True, created_by=admin_id),
-            DeductionFormula(name="固定5kg扣重", formula_type="fixed", value=Decimal("5"), is_active=True, created_by=admin_id),
+            DeductionFormula(
+                name="不扣重", formula_type="none", value=Decimal("1"), 
+                description="净重等于毛重，不扣除任何重量",
+                is_default=True, is_active=True, sort_order=1, created_by=admin_id
+            ),
+            DeductionFormula(
+                name="扣1%", formula_type="percentage", value=Decimal("0.99"),  # 净重 = 毛重 × 0.99
+                description="扣除1%的冰块/包装重量",
+                is_default=False, is_active=True, sort_order=2, created_by=admin_id
+            ),
+            DeductionFormula(
+                name="每件扣0.5kg", formula_type="fixed_per_unit", value=Decimal("0.5"),
+                description="按件扣重，适用于有冰块包装的散件",
+                is_default=False, is_active=True, sort_order=3, created_by=admin_id
+            ),
         ]
         for f in formulas:
             db.add(f)
@@ -320,8 +333,7 @@ async def init_demo_data(
             cost_amount=Decimal("750"),  # 成本金额 = 30 × 25
             profit=Decimal("249.46"),  # 利润 = 1050 - 750 - 50(运费) - 0.54(冷藏费)
             logistics_company_id=lg1.id,
-            shipping_cost=Decimal("50"),
-            total_storage_fee=Decimal("0.54")
+            shipping_cost=Decimal("50")
         )
         db.add(soi1)
         await db.flush()
@@ -335,6 +347,7 @@ async def init_demo_data(
             cost_amount=Decimal("750")
         )
         db.add(oib1)
+        await db.flush()  # 确保 OrderItemBatch 被正确保存
         
         sof1 = OrderFlow(
             order_id=so1.id, flow_type="created", flow_status="completed",

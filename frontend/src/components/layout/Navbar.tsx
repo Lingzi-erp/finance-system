@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { 
   Building2, Package, FileText, Menu, X, Boxes, 
   BarChart3, Settings, ChevronDown, Receipt, CreditCard, Database, 
-  Wallet, Home, Scale
+  Wallet, Home
 } from "lucide-react";
 
 // 导航分组配置
@@ -18,7 +18,6 @@ const navGroups = [
     items: [
       { href: "/entities", label: "客商管理", icon: Building2, description: "供应商、客户、仓库" },
       { href: "/products", label: "商品档案", icon: Package, description: "商品信息与分类" },
-      { href: "/formulas", label: "扣重公式", icon: Scale, description: "毛重净重换算规则" },
     ]
   },
   {

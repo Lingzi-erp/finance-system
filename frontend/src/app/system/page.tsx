@@ -22,9 +22,10 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 const BUILD_DATE = '2024-12-07';
 const CHANGELOG = [
+  { version: '1.2.1', date: '2024-12-07', changes: ['修复冷藏费不随日期变化实时更新的问题', '优化客商交易分析利润计算（基于批次追溯）'] },
   { version: '1.2.0', date: '2024-12-07', changes: ['修复批次出库记录不显示的问题'] },
   { version: '1.1.9', date: '2024-12-07', changes: ['优化更新检查（增加超时和重试）', '修复演示数据批次出库记录', '优化批次追溯界面'] },
   { version: '1.1.8', date: '2024-12-07', changes: ['优化利润计算（基于批次追溯）', '批次详情显示货物流向（入库/出库记录）', '修复输入框点击无反应问题'] },

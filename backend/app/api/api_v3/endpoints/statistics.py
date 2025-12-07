@@ -755,21 +755,30 @@ async def get_entity_trading(
         select(
             func.count(BusinessOrder.id),
             func.coalesce(func.sum(BusinessOrder.total_quantity), 0),
-            func.coalesce(func.sum(BusinessOrder.final_amount), 0)
+            func.coalesce(func.sum(BusinessOrder.total_amount), 0),  # 商品金额（不含费用）
+            func.coalesce(func.sum(BusinessOrder.final_amount), 0),  # 最终金额（含费用）
+            func.coalesce(func.sum(BusinessOrder.total_shipping), 0),  # 运费
+            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0)  # 冷藏费
         ).where(and_(*sales_conditions))
     )
     sales_row = sales_result.first()
     sales_order_count = sales_row[0] if sales_row else 0
     sales_quantity = float(sales_row[1]) if sales_row else 0
-    sales_amount = float(sales_row[2]) if sales_row else 0
+    sales_product_amount = float(sales_row[2]) if sales_row else 0  # 商品金额
+    sales_amount = float(sales_row[3]) if sales_row else 0  # 最终金额
+    sales_shipping = float(sales_row[4]) if sales_row else 0
+    sales_storage_fee = float(sales_row[5]) if sales_row else 0
     
-    # 销售利润（从订单明细中计算）
-    sales_profit_result = await db.execute(
-        select(func.coalesce(func.sum(OrderItem.profit), 0)).join(
-            BusinessOrder, OrderItem.order_id == BusinessOrder.id
-        ).where(and_(*sales_conditions))
+    # 销售利润（从批次追溯计算）
+    # 利润 = 商品销售金额 - 批次成本 - 销售运费 - 销售冷藏费
+    sales_cost_result = await db.execute(
+        select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+        .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+        .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+        .where(and_(*sales_conditions))
     )
-    sales_profit = float(sales_profit_result.scalar() or 0)
+    sales_cost = float(sales_cost_result.scalar() or 0)
+    sales_profit = sales_product_amount - sales_cost - sales_shipping - sales_storage_fee
     
     # 采购统计（作为供应商：source_id = entity_id）
     purchase_conditions = [
@@ -792,6 +801,7 @@ async def get_entity_trading(
     purchase_amount = float(purchase_row[2]) if purchase_row else 0
     
     # 销售商品明细（按商品+包装规格分组）
+    # 先获取商品信息和销售金额
     sales_products_result = await db.execute(
         select(
             Product.id,
@@ -804,8 +814,7 @@ async def get_entity_trading(
             OrderItem.unit_quantity,
             OrderItem.base_unit_symbol,
             func.coalesce(func.sum(OrderItem.quantity), 0).label("quantity"),
-            func.coalesce(func.sum(OrderItem.amount), 0).label("amount"),
-            func.coalesce(func.sum(OrderItem.profit), 0).label("profit")
+            func.coalesce(func.sum(OrderItem.amount), 0).label("amount")
         ).join(
             OrderItem, Product.id == OrderItem.product_id
         ).join(
@@ -821,9 +830,28 @@ async def get_entity_trading(
         )
     )
     
-    sales_products = [
-        {
-            "product_id": row[0],
+    sales_products = []
+    for row in sales_products_result:
+        product_id = row[0]
+        amount = float(row[10])
+        
+        # 获取该商品的批次成本（从 OrderItemBatch 追溯）
+        product_cost_result = await db.execute(
+            select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+            .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+            .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(
+                OrderItem.product_id == product_id,
+                *sales_conditions
+            ))
+        )
+        cost = float(product_cost_result.scalar() or 0)
+        
+        # 商品利润 = 销售金额 - 批次成本（运费/冷藏费在整体利润中扣除）
+        profit = amount - cost
+        
+        sales_products.append({
+            "product_id": product_id,
             "product_name": row[1],
             "product_code": row[2],
             "unit": row[3],
@@ -833,11 +861,9 @@ async def get_entity_trading(
             "unit_quantity": float(row[7]) if row[7] else None,
             "base_unit_symbol": row[8],
             "quantity": float(row[9]),
-            "amount": float(row[10]),
-            "profit": float(row[11])
-        }
-        for row in sales_products_result
-    ]
+            "amount": amount,
+            "profit": profit
+        })
     
     # 采购商品明细（按商品+包装规格分组）
     purchase_products_result = await db.execute(

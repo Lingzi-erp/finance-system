@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -19,6 +19,7 @@ interface BatchAllocation {
   quantity: number;
   available: number;
   cost_price: number;
+  received_at?: string;  // 批次入库日期，用于计算冷藏费
 }
 
 interface OrderItemForm { 
@@ -85,42 +86,66 @@ export default function NewOrderPage() {
   const [driverPhone, setDriverPhone] = useState('');  // 司机电话（每次运输可能不同）
   const [invoiceNo, setInvoiceNo] = useState('');
   const [shippingCost, setShippingCost] = useState<number>(0); // 运费（手动输入）
-  const [storageFee, setStorageFee] = useState<number>(0); // 冷藏费（自动计算）
   const [calculateStorageFee, setCalculateStorageFee] = useState<boolean>(true); // 是否计算冷藏费
-  
-  // 自动计算冷藏费
-  // 采购单：每吨15元（入库费）
-  // 销售单：每吨15元（出库费）+ 每吨每天1.5元（存储费）
-  useEffect(() => {
-    // 如果用户选择不计算冷藏费，设为0
-    if (!calculateStorageFee) {
-      setStorageFee(0);
-      return;
-    }
-    
-    const totalWeight = items.reduce((sum, item) => sum + getItemActualWeight(item), 0);
-    const weightTons = totalWeight / 1000;
-    const baseRatePerTon = 15; // 进出库基础费率：每吨15元
-    const storageCostPerTonPerDay = 1.5; // 存储费率：每吨每天1.5元
-    
-    if (orderType === 'purchase') {
-      // 采购单：入库费 = 吨数 × 15
-      const fee = weightTons * baseRatePerTon;
-      setStorageFee(Math.round(fee * 100) / 100);
-    } else if (orderType === 'sale') {
-      // 销售单：出库费 + 存储费
-      // 实际值由后端根据：装货日期 - 批次入库日期（采购单卸货日期）计算
-      const estimatedDays = 7; // 预估平均存储天数
-      const baseFee = weightTons * baseRatePerTon;
-      const storageCost = weightTons * estimatedDays * storageCostPerTonPerDay;
-      const estimatedFee = baseFee + storageCost;
-      setStorageFee(Math.round(estimatedFee * 100) / 100);
-    }
-  }, [orderType, items, calculateStorageFee]);
   
   // 装卸货日期
   const [loadingDate, setLoadingDate] = useState<string>('');
   const [unloadingDate, setUnloadingDate] = useState<string>('');
+  
+  // 自动计算冷藏费 - 直接计算，每次渲染都重新计算
+  // 采购单：每吨15元（入库费）
+  // 销售单：每吨15元（出库费）+ 每吨每天1.5元（存储费）
+  // 存储天数 = 装货日期 - 批次入库日期
+  const calculateStorageFeeNow = (): number => {
+    if (!calculateStorageFee) return 0;
+    
+    const baseRatePerTon = 15;
+    const storageCostPerTonPerDay = 1.5;
+    
+    if (orderType === 'purchase') {
+      const totalWeight = items.reduce((sum, item) => {
+        if (!item.spec_id || !item.unit_quantity) return sum + item.quantity;
+        if (item.pricing_mode === 'container') return sum + item.quantity * item.unit_quantity;
+        return sum + item.quantity;
+      }, 0);
+      const weightTons = totalWeight / 1000;
+      return Math.round(weightTons * baseRatePerTon * 100) / 100;
+    } else if (orderType === 'sale') {
+      if (!loadingDate) return 0;
+      
+      let totalStorageFee = 0;
+      
+      items.forEach(item => {
+        if (!item.product_id) return;
+        
+        let itemWeight = item.quantity;
+        if (item.spec_id && item.unit_quantity && item.pricing_mode === 'container') {
+          itemWeight = item.quantity * item.unit_quantity;
+        }
+        const itemWeightTons = itemWeight / 1000;
+        const baseFee = itemWeightTons * baseRatePerTon;
+        
+        let storageDays = 0;
+        if (item.batch_allocations?.[0]?.received_at) {
+          const loadDate = new Date(loadingDate);
+          const receivedDate = new Date(item.batch_allocations[0].received_at);
+          loadDate.setHours(0, 0, 0, 0);
+          receivedDate.setHours(0, 0, 0, 0);
+          const diffTime = loadDate.getTime() - receivedDate.getTime();
+          storageDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+        }
+        
+        const storageCost = itemWeightTons * storageDays * storageCostPerTonPerDay;
+        totalStorageFee += baseFee + storageCost;
+      });
+      
+      return Math.round(totalStorageFee * 100) / 100;
+    }
+    return 0;
+  };
+  
+  // 每次渲染时计算冷藏费
+  const storageFee = calculateStorageFeeNow();
   
   // 物流公司列表
   const logisticsCompanies = entities.filter(e => e.entity_type.includes('logistics'));
@@ -329,10 +354,16 @@ export default function NewOrderPage() {
           newItems[index].pricing_mode = 'weight';
         }
       }
-      // 如果是销售，查找库存信息
+      // 如果是销售，查找库存信息并加载批次
       if (orderType === 'sale') {
         const stock = warehouseStocks.find(s => s.product_id === value);
         newItems[index].available_quantity = stock?.available_quantity;
+        // 清空之前的批次选择
+        newItems[index].batch_allocations = [];
+        // 加载该商品的可用批次
+        if (sourceId > 0) {
+          loadProductBatches(value, sourceId);
+        }
       }
     }
     // 切换规格时更新包装信息和计价方式
@@ -451,6 +482,17 @@ export default function NewOrderPage() {
     if (!logisticsCompanyId) { toast({ title: '请选择物流公司', variant: 'destructive' }); return; }
     if (!loadingDate) { toast({ title: '请选择装货日期', variant: 'destructive' }); return; }
     if (!unloadingDate) { toast({ title: '请选择卸货日期', variant: 'destructive' }); return; }
+    // 校验卸货日期不能早于装货日期
+    if (loadingDate && unloadingDate) {
+      const loadDate = new Date(loadingDate);
+      const unloadDate = new Date(unloadingDate);
+      loadDate.setHours(0, 0, 0, 0);
+      unloadDate.setHours(0, 0, 0, 0);
+      if (unloadDate < loadDate) {
+        toast({ title: '日期错误', description: '卸货日期不能早于装货日期', variant: 'destructive' });
+        return;
+      }
+    }
     
     // 校验库存（销售单需要校验，直销不需要）
     if (orderType === 'sale') {
@@ -459,6 +501,22 @@ export default function NewOrderPage() {
         if (available !== undefined && item.quantity > available) {
           toast({ title: '库存不足', description: `${item.product_name} 可用库存仅 ${available}，需要 ${item.quantity}`, variant: 'destructive' });
           return;
+        }
+        // 校验装货日期不能早于批次入库日期
+        if (item.batch_allocations?.[0]?.received_at && loadingDate) {
+          const batchReceivedDate = new Date(item.batch_allocations[0].received_at);
+          const orderLoadingDate = new Date(loadingDate);
+          // 只比较日期部分
+          batchReceivedDate.setHours(0, 0, 0, 0);
+          orderLoadingDate.setHours(0, 0, 0, 0);
+          if (orderLoadingDate < batchReceivedDate) {
+            toast({ 
+              title: '日期错误', 
+              description: `${item.product_name} 的装货日期(${loadingDate})不能早于批次入库日期(${item.batch_allocations[0].received_at?.split('T')[0]})`, 
+              variant: 'destructive' 
+            });
+            return;
+          }
         }
       }
     }
@@ -690,6 +748,73 @@ export default function NewOrderPage() {
                     <div><label className="text-xs text-slate-500 block mb-1">小计</label><div className="h-10 flex items-center font-medium text-slate-900">{formatAmount(item.quantity * item.unit_price)}</div></div>
                   </div>
                   
+                  {/* 销售单：批次选择（必选）- 独立行，占满宽度 */}
+                  {orderType === 'sale' && item.product_id > 0 && productBatches[item.product_id] && productBatches[item.product_id].length > 0 && (
+                    <div className="mt-3">
+                      <label className="text-xs font-medium text-slate-600 block mb-1">📦 选择出货批次 *</label>
+                      <Select 
+                        value={item.batch_allocations?.[0]?.batch_id?.toString() || ''} 
+                        onValueChange={v => {
+                          const batch = productBatches[item.product_id]?.find(b => b.id === parseInt(v));
+                          if (batch) {
+                            updateItem(index, 'batch_allocations', [{
+                              batch_id: batch.id,
+                              batch_no: batch.batch_no,
+                              quantity: item.quantity,
+                              available: batch.available_quantity,
+                              cost_price: batch.cost_price,
+                              received_at: batch.received_at
+                            }]);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-full h-9 text-sm">
+                          <SelectValue placeholder="请选择批次（先进先出）" />
+                        </SelectTrigger>
+                        <SelectContent className="w-[var(--radix-select-trigger-width)]">
+                          {productBatches[item.product_id].map((batch, idx) => (
+                            <SelectItem key={batch.id} value={batch.id.toString()}>
+                              {idx === 0 ? '🔸 ' : ''}{batch.batch_no} | {batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'} | 库存:{Number(batch.available_quantity).toLocaleString()}{item.product_unit} | ¥{Number(batch.cost_price).toFixed(2)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {item.batch_allocations?.[0] && (
+                        <>
+                          <div className="flex items-center gap-2 mt-2 text-xs">
+                            <span className="text-green-600">✓ 已选批次:</span>
+                            <span className="font-medium text-slate-700">{item.batch_allocations[0].batch_no}</span>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-slate-500">
+                              入库 {item.batch_allocations[0].received_at ? new Date(item.batch_allocations[0].received_at).toLocaleDateString('zh-CN') : '-'}
+                            </span>
+                          </div>
+                          {/* 日期校验警告 */}
+                          {loadingDate && item.batch_allocations[0].received_at && (() => {
+                            const batchDate = new Date(item.batch_allocations[0].received_at);
+                            const loadDate = new Date(loadingDate);
+                            batchDate.setHours(0, 0, 0, 0);
+                            loadDate.setHours(0, 0, 0, 0);
+                            return loadDate < batchDate;
+                          })() && (
+                            <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700">
+                              🚫 <strong>日期错误：</strong>装货日期({loadingDate})不能早于批次入库日期({item.batch_allocations[0].received_at?.split('T')[0]})
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {!item.batch_allocations?.[0] && (
+                        <div className="text-xs text-amber-600 mt-2">⚠️ 请选择批次以计算准确的冷藏费</div>
+                      )}
+                    </div>
+                  )}
+                  {/* 批次加载中或无批次 */}
+                  {orderType === 'sale' && item.product_id > 0 && productBatches[item.product_id] && productBatches[item.product_id].length === 0 && (
+                    <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200 text-sm text-amber-700">
+                      ⚠️ 该商品暂无可用库存批次
+                    </div>
+                  )}
+                  
                   {/* 毛重扣重区域：散装规格 或 无规格的重量商品（采购/销售通用） */}
                   {['purchase', 'sale'].includes(orderType) && item.product_id > 0 && (
                     (hasSpec(item) && isSpecBulk(item)) || (!hasSpec(item) && isWeightBasedUnit(item.product_unit))
@@ -893,13 +1018,14 @@ export default function NewOrderPage() {
                     value={unloadingDate} 
                     onChange={e => setUnloadingDate(e.target.value)}
                     required
-                    className="w-full h-10 pl-10 pr-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-700
+                    className={`w-full h-10 pl-10 pr-3 rounded-lg border bg-white text-sm text-slate-700
                       shadow-sm transition-all duration-200
-                      hover:border-amber-300 hover:shadow
-                      focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100
                       [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute 
                       [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full 
-                      [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer
+                      ${loadingDate && unloadingDate && new Date(unloadingDate) < new Date(loadingDate) 
+                        ? 'border-red-400 focus:border-red-500 focus:ring-red-100' 
+                        : 'border-slate-200 hover:border-amber-300 hover:shadow focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100'}`}
                   />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                     <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -909,6 +1035,12 @@ export default function NewOrderPage() {
                 </div>
               </div>
             </div>
+            {/* 日期校验警告 */}
+            {loadingDate && unloadingDate && new Date(unloadingDate) < new Date(loadingDate) && (
+              <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded-lg text-xs text-red-700">
+                🚫 <strong>日期错误：</strong>卸货日期不能早于装货日期
+              </div>
+            )}
           </div>
           
           {/* 采购单：运费和冷藏费 */}

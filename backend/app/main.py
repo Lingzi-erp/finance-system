@@ -30,12 +30,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"数据库表初始化警告: {e}")
     
-    # 运行数据库迁移
+    # 运行数据库迁移和基础数据检查
     try:
         async with SessionLocal() as db:
             result = await run_migrations(db)
-            if result.get("migrations_run"):
-                logger.info(f"📦 数据库迁移完成: {result['migrations_run']}")
+            
+            # 报告列更新
+            if result.get("columns_added"):
+                logger.info(f"📦 数据库结构更新: 添加了 {len(result['columns_added'])} 个字段")
+                for col in result["columns_added"]:
+                    logger.info(f"   ✅ {col}")
+            
+            # 报告基础数据修复
+            formula_result = result.get("deduction_formulas", {})
+            if formula_result.get("action") in ["rebuilt", "updated"]:
+                logger.info(f"🔧 基础数据修复: 扣重公式已更新")
+                for detail in formula_result.get("details", []):
+                    logger.info(f"   ✅ {detail}")
+            
+            # 版本更新
+            if result.get("old_version") != result.get("new_version"):
+                logger.info(f"📊 数据库版本: {result.get('old_version') or '初始'} → {result.get('new_version')}")
+                
     except Exception as e:
         logger.warning(f"数据库迁移跳过: {e}")
     

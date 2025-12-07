@@ -185,13 +185,11 @@ export const batchesApi = {
   },
   
   // 按产品查询可用批次（用于销售选择）
-  listByProduct: async (productId: number, warehouseId?: number): Promise<ListResponse<StockBatch>> => {
+  listByProduct: async (productId: number, storageEntityId?: number): Promise<ListResponse<StockBatch>> => {
     const query = new URLSearchParams();
     query.set('product_id', productId.toString());
-    query.set('has_stock', 'true');
-    query.set('status', 'available');
     query.set('limit', '100');
-    if (warehouseId) query.set('warehouse_id', warehouseId.toString());
+    if (storageEntityId) query.set('storage_entity_id', storageEntityId.toString());
     
     const res = await fetch(`${API_BASE}/batches?${query}`, {
       headers: getAuthHeaders(),
