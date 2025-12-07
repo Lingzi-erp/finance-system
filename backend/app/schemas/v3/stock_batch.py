@@ -123,6 +123,7 @@ class StockBatchResponse(BaseModel):
     product_name: str = ""
     product_code: str = ""
     product_unit: str = ""
+    product_specification: str = ""  # 商品规格
     storage_entity_name: str = ""
     storage_entity_code: str = ""
     source_entity_name: str = ""

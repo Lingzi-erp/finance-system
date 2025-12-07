@@ -44,6 +44,8 @@ class StockResponse(StockBase):
     warehouse_code: str = ""
     product_name: str = ""
     product_code: str = ""
+    product_specification: str = ""  # 商品规格
+    product_category: str = ""  # 商品分类
     product_unit: str = ""
     
     # 包装换算信息（从商品规格获取，用于显示重量换算）
@@ -107,6 +109,7 @@ class StockFlowResponse(StockFlowBase):
     # 关联信息
     warehouse_name: str = ""
     product_name: str = ""
+    product_specification: str = ""  # 商品规格
     order_no: Optional[str] = None
     
     # 是否可撤销（仅手动调整且未被重算覆盖的可撤销）

@@ -256,7 +256,14 @@ export default function FlowsHistoryPage() {
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <Package className="w-4 h-4 text-slate-400" />
-                            <span className="text-sm text-slate-700 font-medium">{flow.product_name}</span>
+                            <span className="text-sm text-slate-700 font-medium">
+                              {flow.product_name}
+                              {flow.product_specification && (
+                                <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                                  {flow.product_specification}
+                                </span>
+                              )}
+                            </span>
                           </div>
                         </td>
                         <td className="p-4 text-center">

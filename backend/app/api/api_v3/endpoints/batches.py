@@ -104,6 +104,7 @@ def build_batch_response(batch: StockBatch) -> StockBatchResponse:
         product_name=batch.product.name if batch.product else "",
         product_code=batch.product.code if batch.product else "",
         product_unit=batch.product.unit if batch.product else "",
+        product_specification=(batch.product.specification or "") if batch.product else "",
         storage_entity_name=batch.storage_entity.name if batch.storage_entity else "",
         storage_entity_code=batch.storage_entity.code if batch.storage_entity else "",
         source_entity_name=batch.source_entity.name if batch.source_entity else "",
@@ -498,10 +499,10 @@ async def get_batch_outbound_records(
     
     def calc_profit(r):
         """
-        计算利润 = 销售金额 - 批次成本 - 分摊运费 - 分摊冷藏费
-        运费和冷藏费两头都是支出：
+        计算利润 = 销售金额 - 批次成本 - 分摊运费 - 分摊冷藏费 - 分摊其他费用
+        费用两头都是支出：
         - 采购端支付的已计入批次成本（cost_amount）
-        - 销售端支付的按比例分摊
+        - 销售端支付的按比例分摊（运费、冷藏费、其他费用）
         """
         if not r.order_item or not r.order_item.unit_price or not r.cost_amount:
             return None
@@ -515,15 +516,16 @@ async def get_batch_outbound_records(
         # 该批次的成本（已含采购运费和冷藏费）
         cost = r.cost_amount
         
-        # 按该明细金额占订单总金额的比例分摊销售端的运费和冷藏费
+        # 按该明细金额占订单总金额的比例分摊销售端的运费、冷藏费和其他费用
         order_total = order.total_amount or Decimal("1")
         item_ratio = (r.order_item.amount or Decimal("0")) / order_total if order_total > 0 else Decimal("0")
         qty_ratio = r.quantity / r.order_item.quantity if r.order_item.quantity else Decimal("0")
         
         shipping_share = (order.total_shipping or Decimal("0")) * item_ratio * qty_ratio
         storage_fee_share = (order.total_storage_fee or Decimal("0")) * item_ratio * qty_ratio
+        other_fee_share = (order.other_fee or Decimal("0")) * item_ratio * qty_ratio
         
-        return sale_amount - cost - shipping_share - storage_fee_share
+        return sale_amount - cost - shipping_share - storage_fee_share - other_fee_share
     
     return [
         OrderItemBatchResponse(
@@ -540,7 +542,8 @@ async def get_batch_outbound_records(
             order_no=r.order_item.order.order_no if r.order_item and r.order_item.order else "",
             order_type=r.order_item.order.order_type if r.order_item and r.order_item.order else "",
             order_type_display=order_type_map.get(r.order_item.order.order_type, "") if r.order_item and r.order_item.order else "",
-            order_date=r.order_item.order.order_date if r.order_item and r.order_item.order else None,
+            # 销售单显示卸货日期，其他显示装货日期或创建日期
+            order_date=r.order_item.order.unloading_date if r.order_item and r.order_item.order and r.order_item.order.order_type == "sale" else (r.order_item.order.loading_date if r.order_item and r.order_item.order else None),
             # 客户信息（销售单的目标是客户）
             customer_id=r.order_item.order.target_id if r.order_item and r.order_item.order else None,
             customer_name=r.order_item.order.target_entity.name if r.order_item and r.order_item.order and r.order_item.order.target_entity else "",

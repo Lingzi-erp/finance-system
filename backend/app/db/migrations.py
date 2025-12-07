@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.1"
+CURRENT_DB_VERSION = "1.2.2"
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -162,6 +162,7 @@ REQUIRED_COLUMNS = [
     # ========== v3_business_orders ==========
     ("v3_business_orders", "total_shipping", "DECIMAL(12,2)", "0"),
     ("v3_business_orders", "total_storage_fee", "DECIMAL(12,2)", "0"),
+    ("v3_business_orders", "other_fee", "DECIMAL(12,2)", "0"),
     ("v3_business_orders", "final_amount", "DECIMAL(12,2)", "0"),
     ("v3_business_orders", "loading_date", "DATETIME", None),
     ("v3_business_orders", "unloading_date", "DATETIME", None),
@@ -175,6 +176,9 @@ REQUIRED_COLUMNS = [
     
     # ========== v3_account_balances ==========
     ("v3_account_balances", "is_initial", "BOOLEAN", "0"),
+    
+    # ========== v3_entities ==========
+    ("v3_entities", "is_system", "BOOLEAN", "0"),
 ]
 
 
@@ -232,6 +236,14 @@ REQUIRED_DEDUCTION_FORMULAS = [
 
 # 旧版本的错误公式名称（需要替换掉）
 OLD_FORMULA_NAMES = ["标准1%扣重", "标准2%扣重", "固定5kg扣重"]
+
+# 系统客商：杂费支出（用于其他费用的账款关联）
+SYSTEM_MISC_EXPENSE_ENTITY = {
+    "code": "SYS_MISC_EXPENSE",
+    "name": "杂费支出",
+    "entity_type": "other",
+    "is_system": True,  # 标记为系统客商，不可删除
+}
 
 
 async def ensure_deduction_formulas(db: AsyncSession) -> dict:
@@ -351,6 +363,64 @@ async def ensure_deduction_formulas(db: AsyncSession) -> dict:
     return result
 
 
+async def ensure_misc_expense_entity(db: AsyncSession) -> dict:
+    """
+    确保"杂费支出"系统客商存在
+    
+    用于关联其他费用产生的账款
+    """
+    result = {
+        "checked": True,
+        "action": "none",
+        "entity_id": None
+    }
+    
+    # 检查表是否存在
+    if not await check_table_exists(db, "v3_entities"):
+        result["action"] = "table_not_exists"
+        return result
+    
+    try:
+        # 检查是否已存在
+        query = await db.execute(text(
+            "SELECT id FROM v3_entities WHERE code = :code"
+        ), {"code": SYSTEM_MISC_EXPENSE_ENTITY["code"]})
+        existing = query.fetchone()
+        
+        if existing:
+            result["action"] = "exists"
+            result["entity_id"] = existing[0]
+        else:
+            # 创建杂费客商
+            await db.execute(text("""
+                INSERT INTO v3_entities 
+                (code, name, entity_type, is_active, is_system, created_by, created_at, updated_at)
+                VALUES (:code, :name, :entity_type, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """), SYSTEM_MISC_EXPENSE_ENTITY)
+            await db.commit()
+            
+            # 获取新创建的ID
+            query = await db.execute(text(
+                "SELECT id FROM v3_entities WHERE code = :code"
+            ), {"code": SYSTEM_MISC_EXPENSE_ENTITY["code"]})
+            new_entity = query.fetchone()
+            
+            result["action"] = "created"
+            result["entity_id"] = new_entity[0] if new_entity else None
+            logger.info(f"已创建系统客商: {SYSTEM_MISC_EXPENSE_ENTITY['name']}")
+            
+    except Exception as e:
+        logger.error(f"确保杂费客商失败: {e}")
+        result["action"] = "error"
+        result["error"] = str(e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+    
+    return result
+
+
 async def run_migrations(db: AsyncSession) -> dict:
     """
     运行数据库迁移
@@ -391,6 +461,12 @@ async def run_migrations(db: AsyncSession) -> dict:
         result["deduction_formulas"] = formula_result
         if formula_result["action"] in ["rebuilt", "updated"]:
             logger.info("基础数据已修复: 扣重公式")
+        
+        # ★ 确保杂费客商存在 ★
+        misc_entity_result = await ensure_misc_expense_entity(db)
+        result["misc_expense_entity"] = misc_entity_result
+        if misc_entity_result["action"] == "created":
+            logger.info("基础数据已创建: 杂费支出客商")
         
         # 更新版本号
         if current_version != CURRENT_DB_VERSION:

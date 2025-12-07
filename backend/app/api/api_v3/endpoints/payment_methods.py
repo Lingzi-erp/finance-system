@@ -20,8 +20,16 @@ from app.schemas.v3.payment_method import (
 
 router = APIRouter()
 
-def build_response(method: PaymentMethod) -> PaymentMethodResponse:
+def build_response(
+    method: PaymentMethod, 
+    stats: dict = None
+) -> PaymentMethodResponse:
     """构建响应对象"""
+    stats = stats or {}
+    total_received = stats.get('received', 0)
+    total_paid = stats.get('paid', 0)
+    balance = total_received - total_paid
+    
     return PaymentMethodResponse(
         id=method.id,
         name=method.name,
@@ -40,6 +48,9 @@ def build_response(method: PaymentMethod) -> PaymentMethodResponse:
         type_display=method.type_display,
         display_name=method.display_name,
         icon=method.icon,
+        total_received=total_received,
+        total_paid=total_paid,
+        balance=balance,
         created_by=method.created_by,
         created_at=method.created_at,
         updated_at=method.updated_at)
@@ -82,8 +93,33 @@ async def list_payment_methods(
     result = await db.execute(query)
     methods = result.scalars().all()
     
+    # 批量查询每个收付款方式的收付款统计
+    method_ids = [m.id for m in methods]
+    stats_map = {}
+    
+    if method_ids:
+        # 按收付款方式分组统计
+        stats_query = (
+            select(
+                PaymentRecord.payment_method_id,
+                PaymentRecord.payment_type,
+                func.sum(PaymentRecord.amount)
+            )
+            .where(PaymentRecord.payment_method_id.in_(method_ids))
+            .group_by(PaymentRecord.payment_method_id, PaymentRecord.payment_type)
+        )
+        stats_result = await db.execute(stats_query)
+        
+        for method_id, payment_type, amount in stats_result.all():
+            if method_id not in stats_map:
+                stats_map[method_id] = {'received': 0, 'paid': 0}
+            if payment_type == 'receive':
+                stats_map[method_id]['received'] = float(amount or 0)
+            elif payment_type == 'pay':
+                stats_map[method_id]['paid'] = float(amount or 0)
+    
     return PaymentMethodListResponse(
-        data=[build_response(m) for m in methods],
+        data=[build_response(m, stats_map.get(m.id)) for m in methods],
         total=total,
         page=page,
         page_size=page_size)

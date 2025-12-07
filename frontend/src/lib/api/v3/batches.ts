@@ -19,6 +19,7 @@ export interface StockBatch {
   product_name: string;
   product_code: string;
   product_unit: string;
+  product_specification?: string;  // 商品规格
   // 存放仓库
   storage_entity_id: number;
   storage_entity_name: string;

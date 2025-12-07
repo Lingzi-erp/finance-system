@@ -71,7 +71,15 @@ export default function PaymentsPage() {
   };
 
   const formatAmount = (amount: number) => 
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+
+  // 格式化大金额，超过1万用"万"为单位
+  const formatLargeAmount = (amount: number) => {
+    if (Math.abs(amount) >= 10000) {
+      return `¥${(amount / 10000).toFixed(2)}万`;
+    }
+    return formatAmount(amount);
+  };
 
   if (loading && payments.length === 0) {
     return (
@@ -112,32 +120,61 @@ export default function PaymentsPage() {
           </div>
         </div>
 
-        {/* 汇总卡片 */}
+        {/* 汇总卡片 - 分两行显示，更清晰 */}
         {summary && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-            <div className="stat-card">
-              <p className="stat-card-label">今日收款</p>
-              <p className="stat-card-value text-green-600">{formatAmount(summary.today_received)}</p>
+          <div className="space-y-4 mb-6">
+            {/* 第一行：今日数据 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="stat-card flex items-center gap-4">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <ArrowDownCircle className="w-6 h-6 text-green-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="stat-card-label">今日收款</p>
+                  <p className="text-xl font-bold text-green-600 truncate" title={formatAmount(summary.today_received)}>
+                    {formatLargeAmount(summary.today_received)}
+                  </p>
+                </div>
+              </div>
+              <div className="stat-card flex items-center gap-4">
+                <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <ArrowUpCircle className="w-6 h-6 text-orange-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="stat-card-label">今日付款</p>
+                  <p className="text-xl font-bold text-orange-600 truncate" title={formatAmount(summary.today_paid)}>
+                    {formatLargeAmount(summary.today_paid)}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="stat-card">
-              <p className="stat-card-label">今日付款</p>
-              <p className="stat-card-value text-orange-600">{formatAmount(summary.today_paid)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">本月收款</p>
-              <p className="stat-card-value text-green-600">{formatAmount(summary.month_received)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">本月付款</p>
-              <p className="stat-card-value text-orange-600">{formatAmount(summary.month_paid)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">累计收款</p>
-              <p className="stat-card-value">{formatAmount(summary.total_received)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">累计付款</p>
-              <p className="stat-card-value">{formatAmount(summary.total_paid)}</p>
+            
+            {/* 第二行：本月和累计数据 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="stat-card">
+                <p className="stat-card-label">本月收款</p>
+                <p className="text-lg font-bold text-green-600 truncate" title={formatAmount(summary.month_received)}>
+                  {formatLargeAmount(summary.month_received)}
+                </p>
+              </div>
+              <div className="stat-card">
+                <p className="stat-card-label">本月付款</p>
+                <p className="text-lg font-bold text-orange-600 truncate" title={formatAmount(summary.month_paid)}>
+                  {formatLargeAmount(summary.month_paid)}
+                </p>
+              </div>
+              <div className="stat-card">
+                <p className="stat-card-label">累计收款</p>
+                <p className="text-lg font-bold text-slate-700 truncate" title={formatAmount(summary.total_received)}>
+                  {formatLargeAmount(summary.total_received)}
+                </p>
+              </div>
+              <div className="stat-card">
+                <p className="stat-card-label">累计付款</p>
+                <p className="text-lg font-bold text-slate-700 truncate" title={formatAmount(summary.total_paid)}>
+                  {formatLargeAmount(summary.total_paid)}
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -197,7 +234,7 @@ export default function PaymentsPage() {
                   <th>金额</th>
                   <th>支付方式</th>
                   <th>关联单号</th>
-                  <th>付款日期</th>
+                  <th>日期</th>
                   <th>操作人</th>
                   <th>操作</th>
                 </tr>
@@ -222,7 +259,14 @@ export default function PaymentsPage() {
                     </td>
                     <td className="text-slate-600">{payment.method_display}</td>
                     <td>
-                      {payment.order_no ? (
+                      {payment.order_no && payment.order_id ? (
+                        <Link 
+                          href={`/orders/${payment.order_id}`}
+                          className="text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          {payment.order_no}
+                        </Link>
+                      ) : payment.order_no ? (
                         <span className="text-slate-600">{payment.order_no}</span>
                       ) : (
                         <span className="text-slate-400">-</span>

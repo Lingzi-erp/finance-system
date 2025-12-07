@@ -22,6 +22,10 @@ export interface PaymentMethod {
   type_display: string;
   display_name: string;
   icon: string;
+  // 流水统计
+  total_received: number;  // 累计收款
+  total_paid: number;      // 累计付款
+  balance: number;         // 结余
   created_by: number;
   created_at: string;
   updated_at: string;

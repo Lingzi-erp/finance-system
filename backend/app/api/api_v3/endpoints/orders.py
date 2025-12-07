@@ -4,7 +4,7 @@ from typing import Any, Optional, List, Dict
 from datetime import datetime
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, and_, delete
+from sqlalchemy import select, func, and_, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy import inspect
@@ -423,10 +423,47 @@ async def list_orders(
         conditions.append(BusinessOrder.target_id == target_id)
     if search:
         conditions.append(BusinessOrder.order_no.contains(search))
-    if start_date:
-        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
-    if end_date:
-        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
+    
+    # 日期筛选逻辑：
+    # - 采购单按装货日期筛选
+    # - 销售单按卸货日期筛选
+    # - 如果未指定类型，则按各自业务日期筛选
+    if start_date or end_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+        
+        if order_type == "purchase":
+            # 采购单：按装货日期筛选
+            if start_dt:
+                conditions.append(BusinessOrder.loading_date >= start_dt)
+            if end_dt:
+                conditions.append(BusinessOrder.loading_date <= end_dt)
+        elif order_type == "sale":
+            # 销售单：按卸货日期筛选
+            if start_dt:
+                conditions.append(BusinessOrder.unloading_date >= start_dt)
+            if end_dt:
+                conditions.append(BusinessOrder.unloading_date <= end_dt)
+        else:
+            # 未指定类型：按各自业务日期筛选（使用 OR 条件）
+            date_conditions = []
+            if start_dt:
+                date_conditions.append(
+                    or_(
+                        and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date >= start_dt),
+                        and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date >= start_dt),
+                        and_(~BusinessOrder.order_type.in_(["purchase", "sale"]), BusinessOrder.order_date >= start_dt)
+                    )
+                )
+            if end_dt:
+                date_conditions.append(
+                    or_(
+                        and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date <= end_dt),
+                        and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date <= end_dt),
+                        and_(~BusinessOrder.order_type.in_(["purchase", "sale"]), BusinessOrder.order_date <= end_dt)
+                    )
+                )
+            conditions.extend(date_conditions)
     
     user_perms = current_user.get_all_permissions()
     if "order.view_all" not in user_perms:

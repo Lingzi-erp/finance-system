@@ -48,6 +48,10 @@ class PaymentMethodResponse(PaymentMethodBase):
     type_display: str = ""
     display_name: str = ""
     icon: str = ""
+    # 流水统计
+    total_received: float = 0  # 累计收款
+    total_paid: float = 0      # 累计付款
+    balance: float = 0         # 结余（收款-付款）
     created_by: int
     created_at: datetime
     updated_at: datetime

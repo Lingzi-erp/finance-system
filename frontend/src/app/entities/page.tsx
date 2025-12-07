@@ -268,14 +268,19 @@ export default function EntitiesPage() {
                 )}
               </div>
               
-              <div className="flex justify-end items-center mt-4 pt-4 border-t border-slate-100">
+              <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
+                {entity.is_system ? (
+                  <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded">系统内置</span>
+                ) : (
+                  <span></span>
+                )}
                 <div className="flex gap-1">
-                  {canEdit && (
+                  {canEdit && !entity.is_system && (
                     <Button variant="ghost" size="sm" onClick={() => handleEdit(entity)}>
                       <Edit className="w-4 h-4" />
                     </Button>
                   )}
-                  {canDelete && (
+                  {canDelete && !entity.is_system && (
                     <Button variant="ghost" size="sm" onClick={() => handleDelete(entity.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
                       <Trash2 className="w-4 h-4" />
                     </Button>

@@ -60,7 +60,7 @@ export default function AccountsPage() {
   };
 
   const formatAmount = (amount: number) => 
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
   if (loading && accounts.length === 0) {
     return (

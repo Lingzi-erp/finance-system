@@ -247,10 +247,17 @@ export default function EntityTradingPage() {
       if (startDate) params.set('start_date', startDate);
       if (endDate) params.set('end_date', endDate);
       
-      const res = await fetch(
-        `${API_BASE}/statistics/entity-trading/${selectedEntityId}?${params}`,
-        { headers: getAuthHeaders() }
-      );
+      let url: string;
+      if (selectedEntityId === 'all_customers' || selectedEntityId === 'all_suppliers') {
+        // 全部客户或全部供应商
+        const entityType = selectedEntityId === 'all_customers' ? 'customer' : 'supplier';
+        url = `${API_BASE}/statistics/entity-trading-summary/${entityType}?${params}`;
+      } else {
+        // 单个客商
+        url = `${API_BASE}/statistics/entity-trading/${selectedEntityId}?${params}`;
+      }
+      
+      const res = await fetch(url, { headers: getAuthHeaders() });
       const data = await handleResponse<EntityTrading>(res);
       setTradingData(data);
     } catch (err: any) {
@@ -265,7 +272,8 @@ export default function EntityTradingPage() {
     return new Intl.NumberFormat('zh-CN', { 
       style: 'currency', 
       currency: 'CNY',
-      minimumFractionDigits: 2 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount);
   };
 
@@ -340,6 +348,21 @@ export default function EntityTradingPage() {
                     <SelectValue placeholder="请选择客户或供应商" />
                   </SelectTrigger>
                   <SelectContent>
+                    {/* 汇总选项 */}
+                    <SelectItem value="all_customers">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-emerald-500" />
+                        <span className="font-medium text-emerald-700">📊 全部客户</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="all_suppliers">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-orange-500" />
+                        <span className="font-medium text-orange-700">📊 全部供应商</span>
+                      </div>
+                    </SelectItem>
+                    <div className="border-t border-slate-200 my-1" />
+                    {/* 具体客商 */}
                     {entities.map((e) => (
                       <SelectItem key={e.id} value={e.id.toString()}>
                         <div className="flex items-center gap-2">
@@ -595,11 +618,18 @@ export default function EntityTradingPage() {
                                 <Package className="w-4 h-4 text-slate-500" />
                               </div>
                               <div>
-                                <div className="font-medium text-slate-800">{product.product_name}</div>
+                                <div className="font-medium text-slate-800">
+                                  {product.product_name}
+                                  {product.specification && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                                      {product.specification}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-xs text-slate-400 flex items-center gap-2">
                                   {product.product_code}
                                   {product.spec_name && (
-                                    <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
+                                    <span className="px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">
                                       {product.spec_name}
                                     </span>
                                   )}

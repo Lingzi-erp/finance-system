@@ -39,6 +39,7 @@ class Entity(Base):
     
     # 状态
     is_active = Column(Boolean, default=True, comment="是否启用")
+    is_system = Column(Boolean, default=False, comment="是否系统客商（不可删除）")
     
     # 审计字段
     created_by = Column(Integer, ForeignKey("sys_user.id"), nullable=False)

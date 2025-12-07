@@ -57,6 +57,7 @@ export default function EditOrderPage() {
   const [targetId, setTargetId] = useState<number>(0);
   const [totalShipping, setTotalShipping] = useState(0);
   const [totalStorageFee, setTotalStorageFee] = useState(0);
+  const [otherFee, setOtherFee] = useState(0);
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<OrderItemForm[]>([]);
 
@@ -66,10 +67,9 @@ export default function EditOrderPage() {
 
   const loadData = async () => {
     try {
-      const [orderData, entitiesRes, productsRes] = await Promise.all([
+      const [orderData, entitiesRes] = await Promise.all([
         ordersApi.get(orderId),
         entitiesApi.list({ limit: 100 }),
-        productsApi.list({ limit: 100 }),
       ]);
 
       if (!orderData) {
@@ -84,13 +84,25 @@ export default function EditOrderPage() {
         return;
       }
 
+      // 分页获取所有商品（后端限制单次最多100条）
+      let allProducts: Product[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const res = await productsApi.list({ page, limit: 100 });
+        allProducts = [...allProducts, ...res.data];
+        hasMore = res.data.length === 100;
+        page++;
+      }
+
       setOrder(orderData);
       setEntities(entitiesRes.data);
-      setProducts(productsRes.data);
+      setProducts(allProducts);
       setSourceId(orderData.source_id);
       setTargetId(orderData.target_id);
       setTotalShipping(orderData.total_shipping || 0);
       setTotalStorageFee(orderData.total_storage_fee || 0);
+      setOtherFee(orderData.other_fee || 0);
       setNotes(orderData.notes || '');
       setItems(
         orderData.items.map((item) => ({
@@ -185,7 +197,7 @@ export default function EditOrderPage() {
 
   const calculateTotals = () => {
     const totalAmount = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
-    return { totalAmount, finalAmount: totalAmount + totalShipping + totalStorageFee };
+    return { totalAmount, finalAmount: totalAmount + totalShipping + totalStorageFee + otherFee };
   };
 
   const handleSubmit = async () => {
@@ -205,6 +217,7 @@ export default function EditOrderPage() {
         target_id: targetId,
         total_shipping: totalShipping,
         total_storage_fee: totalStorageFee,
+        other_fee: otherFee,
         notes: notes || undefined,
         items: items.map((item) => ({
           product_id: item.product_id,
@@ -234,7 +247,7 @@ export default function EditOrderPage() {
   };
 
   const formatAmount = (amount: number) =>
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 }).format(amount);
+    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
   if (loading) {
     return (
@@ -377,6 +390,9 @@ export default function EditOrderPage() {
                             {products.map((p) => (
                               <SelectItem key={p.id} value={p.id.toString()}>
                                 {p.name}
+                                {p.specification && (
+                                  <span className="ml-1 text-xs text-blue-600">[{p.specification}]</span>
+                                )}
                                 {p.specs && p.specs.length > 0 && (
                                   <span className="ml-2 text-xs text-amber-600">{p.unit}</span>
                                 )}
@@ -535,6 +551,24 @@ export default function EditOrderPage() {
                     onChange={(e) => setTotalStorageFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
                     onBlur={(e) => {
                       if (!e.target.value) setTotalStorageFee(0);
+                    }}
+                    onFocus={(e) => e.target.select()}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-between text-sm items-center">
+                <span className="text-ink-medium">其他费用：</span>
+                <div className="flex items-center gap-2">
+                  <span>+</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-24 h-8"
+                    value={otherFee || ''}
+                    onChange={(e) => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    onBlur={(e) => {
+                      if (!e.target.value) setOtherFee(0);
                     }}
                     onFocus={(e) => e.target.select()}
                   />

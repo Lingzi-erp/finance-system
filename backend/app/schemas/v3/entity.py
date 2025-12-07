@@ -41,6 +41,7 @@ class EntityResponse(EntityBase):
     code: str
     type_display: str = ""
     current_balance: float = 0.0  # 当前欠款余额
+    is_system: bool = False  # 是否为系统内置实体
     created_by: int
     created_at: datetime
     updated_at: datetime

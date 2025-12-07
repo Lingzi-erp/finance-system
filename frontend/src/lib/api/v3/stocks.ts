@@ -20,6 +20,8 @@ export interface Stock {
   warehouse_code: string;
   product_name: string;
   product_code: string;
+  product_specification: string;  // 商品规格
+  product_category: string;       // 商品分类
   product_unit: string;
   // 包装规格换算信息（从 ProductSpec 获取）
   container_name?: string;  // 容器名称：件、箱
@@ -44,6 +46,7 @@ export interface StockFlow {
   created_at: string;
   warehouse_name: string;
   product_name: string;
+  product_specification?: string;  // 商品规格
   order_no?: string;
   can_revert: boolean;
 }

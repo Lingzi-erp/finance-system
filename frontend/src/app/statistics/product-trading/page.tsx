@@ -16,6 +16,7 @@ interface ProductTradingItem {
   product_id: number;
   product_code: string;
   product_name: string;
+  product_specification?: string;
   category_name: string;
   base_unit: string;
   purchase_qty: number;
@@ -268,7 +269,14 @@ export default function ProductTradingPage() {
                       <tr key={item.product_id} className="hover:bg-slate-50">
                         <td className="p-3">
                           <div>
-                            <p className="font-medium text-slate-900">{item.product_name}</p>
+                            <p className="font-medium text-slate-900">
+                              {item.product_name}
+                              {item.product_specification && (
+                                <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                                  {item.product_specification}
+                                </span>
+                              )}
+                            </p>
                             <p className="text-xs text-slate-500">
                               {item.product_code}
                               {item.category_name && <span className="ml-1 px-1.5 py-0.5 bg-slate-100 rounded">{item.category_name}</span>}

@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { 
   Settings, Database, Trash2, 
   PackageOpen, AlertTriangle, CheckCircle, Loader2,
-  Info, RefreshCw, Download, Monitor, HardDrive, Cpu
+  Info, RefreshCw, Download, Monitor, HardDrive, Cpu,
+  ArrowUpCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -22,9 +23,18 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.2.2';
 const BUILD_DATE = '2024-12-07';
 const CHANGELOG = [
+  { version: '1.2.2', date: '2024-12-07', changes: [
+    '全面修复规格显示：批次追溯、商品进销统计、库存流水、期初数据等',
+    '新增其他费用字段（订单附加费用，自动生成杂费账款）',
+    '优化资金流水：关联单号可点击跳转',
+    '收付款方式页面新增结余和流水统计',
+    '客商交易分析支持"全部客户/全部供应商"聚合',
+    '修复期初库存只显示实际录入的数据',
+    '库存台账新增规格列和商品分类筛选'
+  ]},
   { version: '1.2.1', date: '2024-12-07', changes: ['修复冷藏费不随日期变化实时更新的问题', '优化客商交易分析利润计算（基于批次追溯）'] },
   { version: '1.2.0', date: '2024-12-07', changes: ['修复批次出库记录不显示的问题'] },
   { version: '1.1.9', date: '2024-12-07', changes: ['优化更新检查（增加超时和重试）', '修复演示数据批次出库记录', '优化批次追溯界面'] },
@@ -132,6 +142,18 @@ export default function SystemPage() {
 
   const actions = [
     {
+      id: 'upgrade-db',
+      title: '升级数据库',
+      description: '检查并更新数据库结构，添加新功能所需的字段，修复基础配置数据。不会影响现有业务数据，适合版本更新后执行。',
+      icon: ArrowUpCircle,
+      color: 'bg-emerald-500 hover:bg-emerald-600',
+      iconBg: 'bg-emerald-100',
+      iconColor: 'text-emerald-600',
+      endpoint: '/system/upgrade-database',
+      confirmMsg: '此操作将检查并升级数据库结构：\n\n✓ 添加新功能所需的数据库列\n✓ 修复/更新基础配置数据\n✓ 确保系统客商存在\n\n不会影响您的业务数据。\n\n确定要执行升级吗？',
+      successMsg: '数据库升级完成'
+    },
+    {
       id: 'init-demo',
       title: '初始化演示数据',
       description: '清除所有数据并创建完整的演示数据，包括供应商、客户、仓库、物流公司、商品、采购单和销售单。适合新用户快速了解系统功能。',
@@ -231,6 +253,10 @@ export default function SystemPage() {
             使用说明
           </h3>
           <div className="space-y-3 text-sm text-gray-600">
+            <div className="flex items-start gap-2">
+              <CheckCircle className="w-4 h-4 text-green-500 mt-0.5" />
+              <p><strong>版本更新后：</strong>点击「升级数据库」确保数据库结构与新版本兼容</p>
+            </div>
             <div className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5" />
               <p><strong>新用户：</strong>点击「初始化演示数据」快速体验系统功能</p>

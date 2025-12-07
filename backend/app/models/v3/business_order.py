@@ -43,6 +43,7 @@ class BusinessOrder(Base):
     total_amount = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="商品总金额")
     total_shipping = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="总运费")
     total_storage_fee = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="总冷藏费")
+    other_fee = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="其他费用")
     total_discount = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="总折扣")
     final_amount = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="最终金额")
     
@@ -109,7 +110,8 @@ class BusinessOrder(Base):
         self.total_quantity = sum(Decimal(str(item.quantity)) for item in self.items)
         self.total_amount = sum(item.amount for item in self.items)
         self.total_shipping = sum(item.shipping_cost or Decimal("0") for item in self.items)
-        # 冷藏费不从明细计算，由用户手动输入
+        # 冷藏费和其他费用由用户手动输入
         storage_fee = self.total_storage_fee or Decimal("0")
-        self.final_amount = self.total_amount + self.total_shipping + storage_fee - self.total_discount
+        other = self.other_fee or Decimal("0")
+        self.final_amount = self.total_amount + self.total_shipping + storage_fee + other - self.total_discount
 

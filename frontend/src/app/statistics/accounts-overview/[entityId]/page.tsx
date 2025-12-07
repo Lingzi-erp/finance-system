@@ -60,7 +60,8 @@ export default function EntityStatementPage() {
     return new Intl.NumberFormat('zh-CN', { 
       style: 'currency', 
       currency: 'CNY',
-      minimumFractionDigits: 2 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount);
   };
 

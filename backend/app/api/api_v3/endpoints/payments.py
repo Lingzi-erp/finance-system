@@ -43,8 +43,10 @@ async def generate_payment_no(db: AsyncSession, payment_type: str) -> str:
 
 def build_payment_response(payment: PaymentRecord) -> PaymentRecordResponse:
     """构建收付款响应"""
+    order_id = None
     order_no = ""
     if payment.account_balance and payment.account_balance.order:
+        order_id = payment.account_balance.order.id
         order_no = payment.account_balance.order.order_no
     
     # 获取收付款方式图标
@@ -68,6 +70,7 @@ def build_payment_response(payment: PaymentRecord) -> PaymentRecordResponse:
         method_icon=method_icon,
         entity_name=payment.entity.name if payment.entity else "",
         entity_code=payment.entity.code if payment.entity else "",
+        order_id=order_id,
         order_no=order_no,
         created_by=payment.created_by,
         creator_name=payment.creator.username if payment.creator else "",

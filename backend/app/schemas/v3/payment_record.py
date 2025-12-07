@@ -43,6 +43,7 @@ class PaymentRecordResponse(BaseModel):
     method_icon: str = ""  # 收付款方式图标
     entity_name: str = ""
     entity_code: str = ""
+    order_id: Optional[int] = None  # 关联订单ID（通过账款获取）
     order_no: str = ""  # 关联订单号（通过账款获取）
     
     # 审计信息

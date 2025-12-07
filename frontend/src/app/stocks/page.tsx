@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Package, Search, AlertTriangle, ArrowUpDown, Building2, RefreshCw, ChevronDown, ChevronUp, History, Boxes } from 'lucide-react';
+import { Package, Search, AlertTriangle, ArrowUpDown, Building2, RefreshCw, ChevronDown, ChevronUp, History, Boxes, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { stocksApi, Stock, entitiesApi, Entity, STOCK_FLOW_TYPE_MAP, StockFlow } from '@/lib/api/v3';
+import { stocksApi, Stock, entitiesApi, Entity, STOCK_FLOW_TYPE_MAP, StockFlow, productsApi, Product, categoriesApi, Category } from '@/lib/api/v3';
 
 export default function StocksPage() {
   const router = useRouter();
@@ -20,6 +20,10 @@ export default function StocksPage() {
   const [search, setSearch] = useState('');
   const [warehouseId, setWarehouseId] = useState<string>('');
   const [warehouses, setWarehouses] = useState<Entity[]>([]);
+  const [productId, setProductId] = useState<string>('');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryId, setCategoryId] = useState<string>('');
   
   // 分页
   const [page, setPage] = useState(1);
@@ -40,6 +44,8 @@ export default function StocksPage() {
   
   useEffect(() => {
     loadWarehouses();
+    loadProducts();
+    loadCategories();
     loadStocks();
   }, []);
   
@@ -55,7 +61,7 @@ export default function StocksPage() {
   
   useEffect(() => {
     loadStocks();
-  }, [page, warehouseId, debouncedSearch]);
+  }, [page, warehouseId, productId, debouncedSearch]);
   
   const loadWarehouses = async () => {
     try {
@@ -66,6 +72,79 @@ export default function StocksPage() {
     }
   };
   
+  const loadCategories = async () => {
+    try {
+      const res = await categoriesApi.list({ limit: 100 });
+      setCategories(res.data);
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+    }
+  };
+  
+  const loadProducts = async () => {
+    try {
+      // 分页获取所有商品（后端限制单次最多100条）
+      let allProducts: Product[] = [];
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const res = await productsApi.list({ page, limit: 100, is_active: true });
+        allProducts = [...allProducts, ...res.data];
+        hasMore = res.data.length === 100;
+        page++;
+      }
+      
+      setProducts(allProducts);
+    } catch (err) {
+      console.error('Failed to load products:', err);
+    }
+  };
+  
+  // 按分类分组的商品
+  const productsByCategory = React.useMemo(() => {
+    const result: { category: string; categoryId: number | null; products: Product[] }[] = [];
+    const categoryMap = new Map<number | null, Product[]>();
+    
+    // 先筛选分类
+    let filteredProducts = products;
+    if (categoryId && categoryId !== 'all') {
+      filteredProducts = products.filter(p => p.category_id === parseInt(categoryId));
+    }
+    
+    // 按分类分组
+    filteredProducts.forEach(p => {
+      const catId = p.category_id || null;
+      if (!categoryMap.has(catId)) {
+        categoryMap.set(catId, []);
+      }
+      categoryMap.get(catId)!.push(p);
+    });
+    
+    // 转换为数组，有分类的排前面
+    const categoryOrder = categories.reduce((acc, cat, idx) => {
+      acc[cat.id] = idx;
+      return acc;
+    }, {} as Record<number, number>);
+    
+    Array.from(categoryMap.entries())
+      .sort((a, b) => {
+        if (a[0] === null) return 1;
+        if (b[0] === null) return -1;
+        return (categoryOrder[a[0]] || 999) - (categoryOrder[b[0]] || 999);
+      })
+      .forEach(([catId, prods]) => {
+        const cat = categories.find(c => c.id === catId);
+        result.push({
+          category: cat?.name || '未分类',
+          categoryId: catId,
+          products: prods.sort((a, b) => a.name.localeCompare(b.name))
+        });
+      });
+    
+    return result;
+  }, [products, categories, categoryId]);
+  
   const loadStocks = async () => {
     try {
       setLoading(true);
@@ -73,6 +152,7 @@ export default function StocksPage() {
         page,
         limit,
         warehouse_id: warehouseId && warehouseId !== 'all' ? parseInt(warehouseId) : undefined,
+        product_id: productId && productId !== 'all' ? parseInt(productId) : undefined,
         search: debouncedSearch || undefined,
       });
       setStocks(res.data);
@@ -206,7 +286,7 @@ export default function StocksPage() {
         {/* 筛选栏 */}
         <div className="filter-panel">
           <div className="flex flex-wrap gap-4 items-end">
-            <div className="flex-1 min-w-[200px]">
+            <div className="flex-1 min-w-[200px] max-w-[300px]">
               <label className="form-label">搜索商品</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -219,7 +299,7 @@ export default function StocksPage() {
               </div>
             </div>
             
-            <div className="w-48">
+            <div className="w-36">
               <label className="form-label">仓库</label>
               <Select value={warehouseId} onValueChange={(v) => { setWarehouseId(v); setPage(1); }}>
                 <SelectTrigger>
@@ -231,6 +311,50 @@ export default function StocksPage() {
                     <SelectItem key={w.id} value={w.id.toString()}>
                       {w.name}
                     </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="w-36">
+              <label className="form-label">商品分类</label>
+              <Select value={categoryId} onValueChange={(v) => { setCategoryId(v); setProductId(''); setPage(1); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部分类" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部分类</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id.toString()}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="w-48">
+              <label className="form-label">商品</label>
+              <Select value={productId} onValueChange={(v) => { setProductId(v); setPage(1); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部商品" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="all">全部商品</SelectItem>
+                  {productsByCategory.map((group) => (
+                    <React.Fragment key={group.categoryId || 'uncategorized'}>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 bg-slate-50 sticky top-0">
+                        {group.category}
+                      </div>
+                      {group.products.map((p) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <span>{p.name}</span>
+                            <span className="text-xs text-slate-400">({p.code})</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </React.Fragment>
                   ))}
                 </SelectContent>
               </Select>
@@ -254,6 +378,7 @@ export default function StocksPage() {
                 <tr>
                     <th>仓库</th>
                     <th>商品</th>
+                    <th>规格</th>
                     <th>当前库存</th>
                     <th>预留</th>
                     <th>可用</th>
@@ -278,14 +403,24 @@ export default function StocksPage() {
                             <div className="font-medium text-slate-900">{stock.product_name}</div>
                             <div className="text-xs text-slate-400">
                             {stock.product_code}
-                            {stock.unit_quantity && stock.unit_quantity > 1 ? (
-                              <span className="ml-1 px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded">
-                                {stock.container_name}({stock.unit_quantity}{stock.base_unit_symbol})
-                              </span>
-                            ) : (
-                              <span className="ml-1">· {stock.product_unit}</span>
+                            {stock.product_category && (
+                              <span className="ml-1 text-slate-300">· {stock.product_category}</span>
                             )}
                           </div>
+                        </div>
+                      </td>
+                        <td>
+                        <div className="text-sm">
+                          {stock.product_specification ? (
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded">{stock.product_specification}</span>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                          {stock.unit_quantity && stock.unit_quantity > 1 && (
+                            <div className="text-xs text-amber-600 mt-1">
+                              {stock.container_name}({stock.unit_quantity}{stock.base_unit_symbol})
+                            </div>
+                          )}
                         </div>
                       </td>
                         <td>
@@ -361,7 +496,7 @@ export default function StocksPage() {
                     {/* 展开的流水记录 */}
                     {expandedStockId === stock.id && (
                       <tr>
-                          <td colSpan={6} className="p-0 bg-slate-50/50">
+                          <td colSpan={7} className="p-0 bg-slate-50/50">
                           <div className="p-4">
                               <h4 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
                                 <History className="w-4 h-4 text-slate-400" />
@@ -471,7 +606,14 @@ export default function StocksPage() {
             <div className="space-y-4">
               <div className="p-3 bg-slate-50 rounded-lg">
                 <div className="text-sm text-slate-500">商品</div>
-                <div className="font-medium text-slate-900">{adjustingStock.product_name}</div>
+                <div className="font-medium text-slate-900">
+                  {adjustingStock.product_name}
+                  {adjustingStock.product_specification && (
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                      {adjustingStock.product_specification}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-slate-400">{adjustingStock.warehouse_name}</div>
               </div>
               

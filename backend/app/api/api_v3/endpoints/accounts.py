@@ -22,10 +22,38 @@ router = APIRouter()
 
 def build_account_response(account: AccountBalance) -> AccountBalanceResponse:
     """构建账款响应"""
-    # 业务日期：优先使用关联订单的业务日期，期初数据使用创建时间
+    # 业务日期逻辑：
+    # - 供应商货款（采购）→ 采购单的装货日期
+    # - 客户货款（销售）→ 销售单的卸货日期
+    # - 冷库费（采购）→ 采购单的卸货日期（货物入库）
+    # - 冷库费（销售）→ 销售单的装货日期（货物出库）
+    # - 运费（采购）→ 采购单的卸货日期（运输完成）
+    # - 运费（销售）→ 销售单的卸货日期（运输完成）
     business_date = account.created_at
-    if account.order:
-        business_date = account.order.order_date or account.created_at
+    if account.order and account.entity:
+        order = account.order
+        entity_type = account.entity.entity_type or ""
+        order_type = order.order_type
+        
+        # 判断是货款、运费还是冷藏费
+        is_warehouse = "warehouse" in entity_type  # 冷库费
+        is_logistics = "logistics" in entity_type  # 运费
+        
+        if is_warehouse:
+            # 冷库费：采购→卸货日期（入库），销售→装货日期（出库）
+            if order_type == "purchase":
+                business_date = order.unloading_date or order.created_at
+            else:  # sale
+                business_date = order.loading_date or order.created_at
+        elif is_logistics:
+            # 运费：都是卸货日期（运输完成）
+            business_date = order.unloading_date or order.created_at
+        else:
+            # 货款：采购→装货日期，销售→卸货日期
+            if order_type == "purchase":
+                business_date = order.loading_date or order.created_at
+            else:  # sale
+                business_date = order.unloading_date or order.created_at
     
     return AccountBalanceResponse(
         id=account.id,
@@ -656,8 +684,29 @@ async def get_entity_statement(
     running_payable = Decimal("0")
     
     for account in accounts:
-        # 业务日期：优先使用订单业务日期，期初数据使用创建时间
-        business_date = account.order.order_date if account.order else account.created_at
+        # 业务日期计算（与 build_account_response 逻辑一致）
+        if account.order and account.entity:
+            order = account.order
+            entity_type = account.entity.entity_type or ""
+            order_type = order.order_type
+            
+            is_warehouse = "warehouse" in entity_type
+            is_logistics = "logistics" in entity_type
+            
+            if is_warehouse:
+                if order_type == "purchase":
+                    business_date = order.unloading_date or account.created_at
+                else:
+                    business_date = order.loading_date or account.created_at
+            elif is_logistics:
+                business_date = order.unloading_date or account.created_at
+            else:
+                if order_type == "purchase":
+                    business_date = order.loading_date or account.created_at
+                else:
+                    business_date = order.unloading_date or account.created_at
+        else:
+            business_date = account.created_at
         
         # 业务单发生
         item = {

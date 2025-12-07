@@ -145,7 +145,7 @@ function NewPaymentForm() {
     : <ArrowUpCircle className="w-8 h-8 text-orange-600" />;
 
   const formatCurrency = (amount: number) => 
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(amount);
+    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
   if (dataLoading) {
     return (

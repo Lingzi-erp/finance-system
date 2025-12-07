@@ -86,6 +86,7 @@ export default function NewOrderPage() {
   const [driverPhone, setDriverPhone] = useState('');  // 司机电话（每次运输可能不同）
   const [invoiceNo, setInvoiceNo] = useState('');
   const [shippingCost, setShippingCost] = useState<number>(0); // 运费（手动输入）
+  const [otherFee, setOtherFee] = useState<number>(0); // 其他费用（手动输入）
   const [calculateStorageFee, setCalculateStorageFee] = useState<boolean>(true); // 是否计算冷藏费
   
   // 装卸货日期
@@ -132,7 +133,8 @@ export default function NewOrderPage() {
           loadDate.setHours(0, 0, 0, 0);
           receivedDate.setHours(0, 0, 0, 0);
           const diffTime = loadDate.getTime() - receivedDate.getTime();
-          storageDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+          // 存储天数 = 装货日期 - 入库日期 + 1（入库当天算一天）
+          storageDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1);
         }
         
         const storageCost = itemWeightTons * storageDays * storageCostPerTonPerDay;
@@ -213,14 +215,24 @@ export default function NewOrderPage() {
 
   const loadBaseData = async () => {
     try {
-      const [entitiesRes, productsRes, formulasRes] = await Promise.all([
+      const [entitiesRes, formulasRes] = await Promise.all([
         entitiesApi.list({ limit: 100 }), 
-        productsApi.list({ limit: 100 }),
         deductionFormulasApi.list({ is_active: true, limit: 100 }),
       ]);
       setEntities(entitiesRes.data);
-      setProducts(productsRes.data);
       setFormulas(formulasRes.data);
+      
+      // 分页获取所有商品（后端限制单次最多100条）
+      let allProducts: Product[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const res = await productsApi.list({ page, limit: 100 });
+        allProducts = [...allProducts, ...res.data];
+        hasMore = res.data.length === 100;
+        page++;
+      }
+      setProducts(allProducts);
     } catch (err: any) { toast({ title: '加载失败', description: err.message, variant: 'destructive' }); }
     finally { setLoading(false); }
   };
@@ -427,12 +439,13 @@ export default function NewOrderPage() {
   const calculateItemSubtotal = (item: OrderItemForm) => item.quantity * item.unit_price + item.shipping_cost;
   const calculateTotals = () => {
     const totalAmount = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
-    // 运费和冷藏费统一使用手动输入
+    // 运费、冷藏费和其他费用
     return { 
       totalAmount, 
       totalShipping: shippingCost, 
       totalStorageFee: storageFee,
-      finalAmount: totalAmount + shippingCost + storageFee 
+      totalOtherFee: otherFee,
+      finalAmount: totalAmount + shippingCost + storageFee + otherFee
     };
   };
 
@@ -531,6 +544,7 @@ export default function NewOrderPage() {
         unloading_date: unloadingDate || undefined,
         total_shipping: shippingCost || undefined,
         total_storage_fee: storageFee || undefined,
+        other_fee: otherFee || undefined,
         calculate_storage_fee: calculateStorageFee,
         notes: notes || undefined, 
         items: items.map((item, idx) => ({ 
@@ -566,7 +580,7 @@ export default function NewOrderPage() {
     finally { setSubmitting(false); }
   };
 
-  const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 }).format(amount);
+  const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   const getTypeLabel = (type: string) => ({ purchase: '采购单', sale: '销售单' }[type] || type);
   const getSourceLabel = () => ({ purchase: '供应商', sale: '出库仓库' }[orderType] || '来源');
   const getTargetLabel = () => ({ purchase: '入库仓库', sale: '客户' }[orderType] || '目标');
@@ -845,9 +859,9 @@ export default function NewOrderPage() {
                         <div>
                           <label className="text-xs text-slate-500 block mb-1">扣重公式</label>
                           <Select 
-                            value={item.deduction_formula_id?.toString() || ''} 
+                            value={item.deduction_formula_id?.toString() || 'none'} 
                             onValueChange={v => {
-                              const fId = v ? parseInt(v) : undefined;
+                              const fId = v && v !== 'none' ? parseInt(v) : undefined;
                               updateItem(index, 'deduction_formula_id', fId);
                               if (item.gross_weight) {
                                 calculateItemNetWeight(index, item.gross_weight, fId, item.unit_count);
@@ -856,7 +870,8 @@ export default function NewOrderPage() {
                           >
                             <SelectTrigger className="bg-white"><SelectValue placeholder="选择公式" /></SelectTrigger>
                             <SelectContent>
-                              {formulas.map(f => (
+                              <SelectItem value="none">不扣重</SelectItem>
+                              {formulas.filter(f => f.name !== '不扣重').map(f => (
                                 <SelectItem key={f.id} value={f.id.toString()}>
                                   {f.name}
                                 </SelectItem>
@@ -872,12 +887,22 @@ export default function NewOrderPage() {
                               type="number" 
                               min="1"
                               step="1"
-                              value={item.unit_count || 1}
+                              value={item.unit_count ?? ''}
                               onChange={e => {
-                                const val = parseInt(e.target.value) || 1;
+                                const val = e.target.value === '' ? undefined : parseInt(e.target.value);
                                 updateItem(index, 'unit_count', val);
-                                if (item.gross_weight) {
+                                if (item.gross_weight && val) {
                                   calculateItemNetWeight(index, item.gross_weight, item.deduction_formula_id, val);
+                                }
+                              }}
+                              onBlur={e => {
+                                // 失去焦点时，如果为空或小于1，恢复为1
+                                const val = parseInt(e.target.value);
+                                if (!val || val < 1) {
+                                  updateItem(index, 'unit_count', 1);
+                                  if (item.gross_weight) {
+                                    calculateItemNetWeight(index, item.gross_weight, item.deduction_formula_id, 1);
+                                  }
                                 }
                               }}
                               placeholder="件数"
@@ -1084,6 +1109,18 @@ export default function NewOrderPage() {
                   </div>
                   <p className="text-xs text-slate-400 mt-1">💡 每吨15元，应付冷库</p>
                 </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">其他费用（元）</label>
+                  <Input 
+                    type="number" 
+                    step="0.01" 
+                    min="0"
+                    value={otherFee || ''} 
+                    onChange={e => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    placeholder="杂费支出"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">💡 装卸费、过磅费等</p>
+                </div>
               </div>
             </div>
           )}
@@ -1116,7 +1153,7 @@ export default function NewOrderPage() {
                   />
                   <p className="text-xs text-slate-400 mt-1">💡 应付物流公司（如有）</p>
                 </div>
-                <div className="col-span-2">
+                <div>
                   <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
                   <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
                     {calculateStorageFee 
@@ -1125,11 +1162,20 @@ export default function NewOrderPage() {
                     }
                   </div>
                   {calculateStorageFee && (
-                    <>
-                      <p className="text-xs text-slate-400 mt-1">💡 每吨15元 + 每吨×存储天数×1.5元</p>
-                      <p className="text-xs text-slate-400">存储天数 = 装货日期 - 入库日期</p>
-                    </>
+                    <p className="text-xs text-slate-400 mt-1">💡 每吨15元 + 存储费</p>
                   )}
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">其他费用（元）</label>
+                  <Input 
+                    type="number" 
+                    step="0.01" 
+                    min="0"
+                    value={otherFee || ''} 
+                    onChange={e => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    placeholder="杂费支出"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">💡 装卸费、过磅费等</p>
                 </div>
               </div>
             </div>
@@ -1145,6 +1191,7 @@ export default function NewOrderPage() {
               <div className="flex justify-between text-sm"><span className="text-slate-500">商品金额：</span><span className="text-slate-700">{formatAmount(totals.totalAmount)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-slate-500">运费合计：</span><span className="text-slate-700">+{formatAmount(totals.totalShipping)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-slate-500">冷藏费：</span><span className="text-slate-700">+{formatAmount(totals.totalStorageFee)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-slate-500">其他费用：</span><span className="text-slate-700">+{formatAmount(totals.totalOtherFee)}</span></div>
               <div className="border-t border-amber-200 pt-2 mt-2"><div className="flex justify-between text-lg font-bold"><span className="text-amber-800">最终金额：</span><span className="text-amber-600">{formatAmount(totals.finalAmount)}</span></div></div>
             </div>
           </div>

@@ -4,7 +4,8 @@
 规则：
 - 采购单：每吨 15 元（入库费）
 - 销售单：每吨 15 元（出库费） + 每吨每天 1.5 元（存储费）
-  - 存储天数 = 销售单装货日期 - 批次入库日期（采购单卸货日期）
+  - 存储天数 = 销售单装货日期 - 批次入库日期（采购单卸货日期） + 1
+  - 入库当天也算一天冷藏费
   
 注意：所有日期计算都基于用户输入的业务日期（装货/卸货日期），而非系统时间戳
 """
@@ -89,8 +90,8 @@ async def calculate_storage_fee(
                 for record in batch_records:
                     batch = record.batch
                     if batch and batch.received_at:
-                        # 计算存储天数：出库日期 - 入库日期（当天出库为0天）
-                        days = max(0, (outbound_date - batch.received_at).days)
+                        # 计算存储天数：出库日期 - 入库日期 + 1（入库当天算一天）
+                        days = max(1, (outbound_date - batch.received_at).days + 1)
                         batch_weight = record.quantity
                         total_weighted_days += batch_weight * Decimal(str(days))
                         total_weight_kg += batch_weight
@@ -111,7 +112,8 @@ async def calculate_storage_fee(
                     earliest_batch = batch_result.scalar_one_or_none()
                     
                     if earliest_batch and earliest_batch.received_at:
-                        days = max(0, (outbound_date - earliest_batch.received_at).days)
+                        # 计算存储天数：出库日期 - 入库日期 + 1（入库当天算一天）
+                        days = max(1, (outbound_date - earliest_batch.received_at).days + 1)
                         total_weighted_days += item_weight * Decimal(str(days))
                         total_weight_kg += item_weight
                     else:

@@ -97,6 +97,7 @@ export interface BusinessOrder {
   total_amount: number;
   total_shipping: number;
   total_storage_fee: number;
+  other_fee: number;
   total_discount: number;
   final_amount: number;
   order_date: string;
@@ -123,6 +124,7 @@ export interface OrderCreateData {
   total_discount?: number;
   total_shipping?: number;
   total_storage_fee?: number;
+  other_fee?: number;
   calculate_storage_fee?: boolean;
   notes?: string;
   items: {

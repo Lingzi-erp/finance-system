@@ -69,6 +69,8 @@ def build_stock_response(stock: Stock) -> StockResponse:
         warehouse_code=stock.warehouse.code if stock.warehouse else "",
         product_name=stock.product.name if stock.product else "",
         product_code=stock.product.code if stock.product else "",
+        product_specification=(stock.product.specification or "") if stock.product else "",
+        product_category=(stock.product.category or "") if stock.product else "",
         product_unit=stock.product.unit if stock.product else "",
         composite_unit_id=composite_unit_id,
         composite_unit_name=composite_unit_name,
@@ -115,6 +117,7 @@ def build_flow_response(flow: StockFlow, reverted_flow_ids: set = None) -> Stock
         created_at=flow.created_at,
         warehouse_name=flow.stock.warehouse.name if flow.stock and flow.stock.warehouse else "",
         product_name=flow.stock.product.name if flow.stock and flow.stock.product else "",
+        product_specification=(flow.stock.product.specification or "") if flow.stock and flow.stock.product else "",
         order_no=flow.order.order_no if flow.order else None,
         can_revert=can_revert)
 

@@ -126,14 +126,24 @@ export default function BatchesPage() {
   
   const loadBaseData = async () => {
     try {
-      const [warehousesRes, productsRes, formulasRes] = await Promise.all([
+      const [warehousesRes, formulasRes] = await Promise.all([
         entitiesApi.list({ entity_type: 'warehouse', limit: 100 }),
-        productsApi.list({ limit: 100 }),
         deductionFormulasApi.list({ is_active: true, limit: 100 }),
       ]);
       setWarehouses(warehousesRes.data);
-      setProducts(productsRes.data);
       setFormulas(formulasRes.data);
+      
+      // 分页获取所有商品（后端限制单次最多100条）
+      let allProducts: Product[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const res = await productsApi.list({ page, limit: 100 });
+        allProducts = [...allProducts, ...res.data];
+        hasMore = res.data.length === 100;
+        page++;
+      }
+      setProducts(allProducts);
     } catch (err) {
       console.error('Failed to load base data:', err);
     }
@@ -233,7 +243,7 @@ export default function BatchesPage() {
   
   const formatCurrency = (value: number | null | undefined) => {
     const num = value ?? 0;
-    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(num);
+    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
   };
   
   const formatNumber = (value: number | null | undefined, decimals = 2) => {
@@ -398,7 +408,14 @@ export default function BatchesPage() {
                           )}
                         </td>
                         <td>
-                          <div className="font-medium text-slate-900">{batch.product_name}</div>
+                          <div className="font-medium text-slate-900">
+                            {batch.product_name}
+                            {batch.product_specification && (
+                              <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                                {batch.product_specification}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-400">{batch.product_code}</div>
                         </td>
                         <td>
@@ -671,7 +688,7 @@ export default function BatchesPage() {
                     <SelectContent>
                       {products.map((p) => (
                         <SelectItem key={p.id} value={p.id.toString()}>
-                          {p.name} ({p.code})
+                          {p.name}{p.specification ? ` [${p.specification}]` : ''} ({p.code})
                         </SelectItem>
                       ))}
                     </SelectContent>

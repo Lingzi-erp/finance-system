@@ -18,6 +18,7 @@ export interface Entity {
   current_balance?: number;
   notes?: string;
   is_active: boolean;
+  is_system?: boolean;  // 是否为系统内置实体
   created_by: number;
   created_at: string;
   updated_at: string;

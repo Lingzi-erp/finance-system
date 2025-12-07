@@ -1,15 +1,19 @@
 """
 业务单账款操作模块
 - 自动生成应收/应付账款
-- 货款、运费、冷藏费分别生成账单
+- 货款、运费、冷藏费、其他费用分别生成账单
 """
 
 from decimal import Decimal
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.v3.business_order import BusinessOrder
 from app.models.v3.entity import Entity
 from app.models.v3.account_balance import AccountBalance
+
+# 系统杂费客商编码（用于关联其他费用账款）
+MISC_EXPENSE_ENTITY_CODE = "SYS_MISC_EXPENSE"
 
 async def _create_single_account(
     db: AsyncSession,
@@ -50,7 +54,7 @@ async def create_account_balance(
     """
     业务单完成时自动创建应收/应付账款
     
-    **重要改进：货款、运费、冷藏费分别生成账单**
+    **重要改进：货款、运费、冷藏费、其他费用分别生成账单**
     
     规则：
     - 销售完成 → 应收账款（客户欠我们钱）
@@ -63,6 +67,7 @@ async def create_account_balance(
     - 货款账单 → 关联供应商/客户
     - 运费账单 → 关联物流公司（我方支付，应付账款）
     - 冷藏费账单 → 关联仓库/冷库（我方支付，应付账款）
+    - 其他费用账单 → 关联"杂费支出"系统客商（我方支付，应付账款）
     
     **运费逻辑**：
     - 运费总是由我方支付给物流公司（应付）
@@ -74,17 +79,22 @@ async def create_account_balance(
     - 采购时冷库是目标方（target_id）
     - 销售时冷库是来源方（source_id）
     
+    **其他费用逻辑**：
+    - 其他费用关联到系统的"杂费支出"客商
+    - 总是作为应付账款记录
+    
     注意：退货单独立创建账款记录，不自动抵扣原订单。
     抵扣/核销操作由用户在收付款时手动进行。
     """
     order_type = order.order_type
     
-    # 计算货款、运费和冷藏费
+    # 计算货款、运费、冷藏费和其他费用
     goods_amount = order.total_amount or Decimal("0")  # 商品金额
     shipping_amount = order.total_shipping or Decimal("0")  # 运费
     storage_fee = order.total_storage_fee or Decimal("0")  # 冷藏费
+    other_fee = order.other_fee or Decimal("0")  # 其他费用
     
-    if goods_amount <= Decimal("0") and shipping_amount <= Decimal("0") and storage_fee <= Decimal("0"):
+    if goods_amount <= Decimal("0") and shipping_amount <= Decimal("0") and storage_fee <= Decimal("0") and other_fee <= Decimal("0"):
         return
     
     # 获取物流公司ID（从第一个订单项）
@@ -94,6 +104,15 @@ async def create_account_balance(
             if item.logistics_company_id:
                 logistics_company_id = item.logistics_company_id
                 break
+    
+    # 获取杂费支出客商ID（如果有其他费用）
+    misc_expense_entity_id = None
+    if other_fee > Decimal("0"):
+        misc_result = await db.execute(
+            select(Entity.id).where(Entity.code == MISC_EXPENSE_ENTITY_CODE)
+        )
+        misc_entity = misc_result.scalar_one_or_none()
+        misc_expense_entity_id = misc_entity
     
     # 根据订单类型创建账款
     if order_type == "sale":
@@ -118,6 +137,13 @@ async def create_account_balance(
                 "payable", storage_fee,
                 f"冷藏费应付 - 业务单 {order.order_no}"
             )
+        # 其他费用：应付给杂费支出客商
+        if other_fee > Decimal("0") and misc_expense_entity_id:
+            await _create_single_account(
+                db, misc_expense_entity_id, order.id, order.order_no,
+                "payable", other_fee,
+                f"其他费用 - 业务单 {order.order_no}"
+            )
                 
     elif order_type == "purchase":
         # 采购 → 应付账款，实体是供应商（来源方）
@@ -140,6 +166,13 @@ async def create_account_balance(
                 db, order.target_id, order.id, order.order_no,
                 "payable", storage_fee,
                 f"冷藏费应付 - 业务单 {order.order_no}"
+            )
+        # 其他费用：应付给杂费支出客商
+        if other_fee > Decimal("0") and misc_expense_entity_id:
+            await _create_single_account(
+                db, misc_expense_entity_id, order.id, order.order_no,
+                "payable", other_fee,
+                f"其他费用 - 业务单 {order.order_no}"
             )
             
     elif order_type == "return_in":

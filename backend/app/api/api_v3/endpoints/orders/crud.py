@@ -125,6 +125,7 @@ async def create_order(
         unloading_date=order_in.unloading_date,
         total_discount=Decimal(str(order_in.total_discount)),
         total_storage_fee=Decimal(str(order_in.total_storage_fee)),
+        other_fee=Decimal(str(order_in.other_fee)),
         calculate_storage_fee=order_in.calculate_storage_fee,
         notes=order_in.notes,
         created_by=1
@@ -176,6 +177,7 @@ async def create_order(
         total_amount 
         + order.total_shipping 
         + Decimal(str(order_in.total_storage_fee)) 
+        + Decimal(str(order_in.other_fee))
         - Decimal(str(order_in.total_discount))
     )
     
@@ -250,6 +252,8 @@ async def update_order(
             order.total_shipping = Decimal(str(order_in.total_shipping))
         if order_in.total_storage_fee is not None:
             order.total_storage_fee = Decimal(str(order_in.total_storage_fee))
+        if order_in.other_fee is not None:
+            order.other_fee = Decimal(str(order_in.other_fee))
         if order_in.notes is not None:
             order.notes = order_in.notes
     
@@ -259,18 +263,21 @@ async def update_order(
     elif not allow_basic_fields:
         raise HTTPException(status_code=400, detail="修改已确认业务单时必须提交新的商品明细")
     
-    # 如果手动设置了整单运费或冷藏费，重新应用并计算最终金额
+    # 如果手动设置了整单运费、冷藏费或其他费用，重新应用并计算最终金额
     # (因为 set_order_items 可能会覆盖这些值)
     if order_in.total_shipping is not None:
         order.total_shipping = Decimal(str(order_in.total_shipping))
     if order_in.total_storage_fee is not None:
         order.total_storage_fee = Decimal(str(order_in.total_storage_fee))
+    if order_in.other_fee is not None:
+        order.other_fee = Decimal(str(order_in.other_fee))
     
     # 重新计算最终金额
     order.final_amount = (
         (order.total_amount or Decimal("0"))
         + (order.total_shipping or Decimal("0")) 
         + (order.total_storage_fee or Decimal("0")) 
+        + (order.other_fee or Decimal("0"))
         - (order.total_discount or Decimal("0"))
     )
     

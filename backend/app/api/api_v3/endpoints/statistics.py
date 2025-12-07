@@ -4,11 +4,60 @@ from typing import Any, Optional, List, Dict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
+
+def get_business_date_field(order_type: Optional[str] = None):
+    """
+    获取业务日期字段
+    - 采购单：装货日期 (loading_date)
+    - 销售单：卸货日期 (unloading_date)
+    - 其他/未指定：order_date
+    """
+    if order_type == "purchase":
+        return BusinessOrder.loading_date
+    elif order_type == "sale":
+        return BusinessOrder.unloading_date
+    return BusinessOrder.order_date
+
+def build_date_condition(order_type: Optional[str], start_date, end_date):
+    """
+    构建日期筛选条件
+    - 如果指定了订单类型，使用对应的业务日期字段
+    - 如果未指定类型，对采购用装货日期，对销售用卸货日期
+    """
+    conditions = []
+    
+    if order_type:
+        # 指定类型时，使用对应的日期字段
+        date_field = get_business_date_field(order_type)
+        if start_date:
+            conditions.append(date_field >= start_date)
+        if end_date:
+            conditions.append(date_field <= end_date)
+    else:
+        # 未指定类型时，按类型分别筛选
+        if start_date:
+            conditions.append(
+                or_(
+                    and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date >= start_date),
+                    and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date >= start_date),
+                    and_(~BusinessOrder.order_type.in_(["purchase", "sale"]), BusinessOrder.order_date >= start_date)
+                )
+            )
+        if end_date:
+            conditions.append(
+                or_(
+                    and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date <= end_date),
+                    and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date <= end_date),
+                    and_(~BusinessOrder.order_type.in_(["purchase", "sale"]), BusinessOrder.order_date <= end_date)
+                )
+            )
+    
+    return conditions
 from app.models.v3.business_order import BusinessOrder
 from app.models.v3.order_item import OrderItem
 from app.models.v3.entity import Entity
@@ -39,7 +88,7 @@ async def get_dashboard(
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
     
-    # 今日销售（使用业务日期 order_date 筛选）
+    # 今日销售（销售单按卸货日期筛选）
     today_sales_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -47,14 +96,14 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= today_start
+            BusinessOrder.unloading_date >= today_start
         )
     )
     today_sales_row = today_sales_result.first()
     today_sales = float(today_sales_row[0]) if today_sales_row else 0
     today_sales_count = int(today_sales_row[1]) if today_sales_row else 0
     
-    # 今日采购（使用业务日期 order_date 筛选）
+    # 今日采购（采购单按装货日期筛选）
     today_purchase_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -62,7 +111,7 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "purchase",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= today_start
+            BusinessOrder.loading_date >= today_start
         )
     )
     today_purchase_row = today_purchase_result.first()
@@ -87,7 +136,7 @@ async def get_dashboard(
     )
     today_paid = float(today_paid_result.scalar() or 0)
     
-    # 本月销售（使用业务日期 order_date 筛选）
+    # 本月销售（销售单按卸货日期筛选）
     month_sales_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -95,14 +144,14 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= month_start
+            BusinessOrder.unloading_date >= month_start
         )
     )
     month_sales_row = month_sales_result.first()
     month_sales = float(month_sales_row[0]) if month_sales_row else 0
     month_sales_count = int(month_sales_row[1]) if month_sales_row else 0
     
-    # 本月采购（使用业务日期 order_date 筛选）
+    # 本月采购（采购单按装货日期筛选）
     month_purchase_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),
@@ -110,7 +159,7 @@ async def get_dashboard(
         ).where(
             BusinessOrder.order_type == "purchase",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= month_start
+            BusinessOrder.loading_date >= month_start
         )
     )
     month_purchase_row = month_purchase_result.first()
@@ -118,17 +167,17 @@ async def get_dashboard(
     month_purchase_count = int(month_purchase_row[1]) if month_purchase_row else 0
     
     # 本月利润（完全从单据和批次追溯计算）
-    # 利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费
-    # 注意：运费和冷藏费"两头都是支出"：
+    # 利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费 - 销售其他费用
+    # 注意：运费、冷藏费、其他费用"两头都是支出"：
     #   - 采购端支付的运费和冷藏费 → 已计入批次成本（real_cost_price）
-    #   - 销售端支付的运费和冷藏费 → 额外支出
+    #   - 销售端支付的运费、冷藏费、其他费用 → 额外支出
     
-    # 1. 获取本月销售金额（商品金额，不含运费冷藏费）
+    # 1. 获取本月销售金额（商品金额，不含运费冷藏费等）- 销售单按卸货日期
     month_sale_amount_result = await db.execute(
         select(func.coalesce(func.sum(BusinessOrder.total_amount), 0)).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= month_start
+            BusinessOrder.unloading_date >= month_start
         )
     )
     month_sale_amount = float(month_sale_amount_result.scalar() or 0)
@@ -141,28 +190,30 @@ async def get_dashboard(
         .where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= month_start
+            BusinessOrder.unloading_date >= month_start
         )
     )
     month_cost = float(month_cost_result.scalar() or 0)
     
-    # 3. 获取本月销售端支付的运费和冷藏费
+    # 3. 获取本月销售端支付的运费、冷藏费和其他费用
     month_fees_result = await db.execute(
         select(
             func.coalesce(func.sum(BusinessOrder.total_shipping), 0),
-            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0)
+            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0),
+            func.coalesce(func.sum(BusinessOrder.other_fee), 0)
         ).where(
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
-            BusinessOrder.order_date >= month_start
+            BusinessOrder.unloading_date >= month_start
         )
     )
     month_fees_row = month_fees_result.first()
     month_shipping = float(month_fees_row[0]) if month_fees_row else 0
     month_storage_fee = float(month_fees_row[1]) if month_fees_row else 0
+    month_other_fee = float(month_fees_row[2]) if month_fees_row else 0
     
-    # 4. 计算利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费
-    month_profit = month_sale_amount - month_cost - month_shipping - month_storage_fee
+    # 4. 计算利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费 - 其他费用
+    month_profit = month_sale_amount - month_cost - month_shipping - month_storage_fee - month_other_fee
     
     # 待处理订单
     pending_orders_result = await db.execute(
@@ -243,7 +294,7 @@ async def get_dashboard(
         for o in recent_orders_result.scalars().all()
     ]
     
-    # 销售趋势（最近7天，使用业务日期 order_date）
+    # 销售趋势（最近7天，销售单按卸货日期）
     sales_trend = []
     for i in range(6, -1, -1):
         day = now - timedelta(days=i)
@@ -254,8 +305,8 @@ async def get_dashboard(
             select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
                 BusinessOrder.order_type == "sale",
                 BusinessOrder.status == "completed",
-                BusinessOrder.order_date >= day_start,
-                BusinessOrder.order_date < day_end
+                BusinessOrder.unloading_date >= day_start,
+                BusinessOrder.unloading_date < day_end
             )
         )
         sales_trend.append({
@@ -300,11 +351,11 @@ async def get_sales_statistics(
         BusinessOrder.status == "completed"
     ]
     
-    # 使用业务日期（order_date）筛选，而非完成时间
+    # 销售单按卸货日期筛选
     if start_date:
-        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.unloading_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.unloading_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     items = []
     
@@ -378,19 +429,19 @@ async def get_sales_statistics(
             ))
     
     else:
-        # 按日期统计（使用业务日期 order_date）
+        # 按日期统计（销售单按卸货日期）
         result = await db.execute(
             select(
-                func.date(BusinessOrder.order_date).label("date"),
+                func.date(BusinessOrder.unloading_date).label("date"),
                 func.count(BusinessOrder.id).label("order_count"),
                 func.coalesce(func.sum(BusinessOrder.total_quantity), 0).label("total_quantity"),
                 func.coalesce(func.sum(BusinessOrder.final_amount), 0).label("total_amount")
             ).where(
                 and_(*conditions)
             ).group_by(
-                func.date(BusinessOrder.order_date)
+                func.date(BusinessOrder.unloading_date)
             ).order_by(
-                func.date(BusinessOrder.order_date).desc()
+                func.date(BusinessOrder.unloading_date).desc()
             ).limit(limit)
         )
         
@@ -438,11 +489,11 @@ async def get_purchase_statistics(
         BusinessOrder.status == "completed"
     ]
     
-    # 使用业务日期（order_date）筛选，而非完成时间
+    # 采购单按装货日期筛选
     if start_date:
-        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.loading_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.loading_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     items = []
     
@@ -507,19 +558,19 @@ async def get_purchase_statistics(
             ))
     
     else:
-        # 按日期统计（使用业务日期 order_date）
+        # 按日期统计（采购单按装货日期）
         result = await db.execute(
             select(
-                func.date(BusinessOrder.order_date).label("date"),
+                func.date(BusinessOrder.loading_date).label("date"),
                 func.count(BusinessOrder.id).label("order_count"),
                 func.coalesce(func.sum(BusinessOrder.total_quantity), 0).label("total_quantity"),
                 func.coalesce(func.sum(BusinessOrder.final_amount), 0).label("total_amount")
             ).where(
                 and_(*conditions)
             ).group_by(
-                func.date(BusinessOrder.order_date)
+                func.date(BusinessOrder.loading_date)
             ).order_by(
-                func.date(BusinessOrder.order_date).desc()
+                func.date(BusinessOrder.loading_date).desc()
             ).limit(limit)
         )
         
@@ -671,20 +722,22 @@ async def get_entity_rank(
     if rank_type == "sales":
         order_type = "sale"
         entity_field = BusinessOrder.target_id
+        date_field = BusinessOrder.unloading_date  # 销售按卸货日期
     else:
         order_type = "purchase"
         entity_field = BusinessOrder.source_id
+        date_field = BusinessOrder.loading_date  # 采购按装货日期
     
     conditions = [
         BusinessOrder.order_type == order_type,
         BusinessOrder.status == "completed"
     ]
     
-    # 使用业务日期（order_date）筛选，而非完成时间
+    # 使用业务日期筛选
     if start_date:
-        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(date_field >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(date_field <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     result = await db.execute(
         select(
@@ -735,20 +788,23 @@ async def get_entity_trading(
     if not entity:
         return {"error": "Entity not found"}
     
-    # 构建日期条件（使用业务日期 order_date）
-    date_conditions = []
-    if start_date:
-        date_conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
-    if end_date:
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        date_conditions.append(BusinessOrder.order_date < end_dt)
+    # 解析日期
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) if end_date else None
+    
+    # 销售统计的日期条件（销售单按卸货日期）
+    sales_date_conditions = []
+    if start_dt:
+        sales_date_conditions.append(BusinessOrder.unloading_date >= start_dt)
+    if end_dt:
+        sales_date_conditions.append(BusinessOrder.unloading_date < end_dt)
     
     # 销售统计（作为客户：target_id = entity_id）
     sales_conditions = [
         BusinessOrder.order_type == "sale",
         BusinessOrder.status == "completed",
         BusinessOrder.target_id == entity_id,
-        *date_conditions
+        *sales_date_conditions
     ]
     
     sales_result = await db.execute(
@@ -758,7 +814,8 @@ async def get_entity_trading(
             func.coalesce(func.sum(BusinessOrder.total_amount), 0),  # 商品金额（不含费用）
             func.coalesce(func.sum(BusinessOrder.final_amount), 0),  # 最终金额（含费用）
             func.coalesce(func.sum(BusinessOrder.total_shipping), 0),  # 运费
-            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0)  # 冷藏费
+            func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0),  # 冷藏费
+            func.coalesce(func.sum(BusinessOrder.other_fee), 0)  # 其他费用
         ).where(and_(*sales_conditions))
     )
     sales_row = sales_result.first()
@@ -768,9 +825,10 @@ async def get_entity_trading(
     sales_amount = float(sales_row[3]) if sales_row else 0  # 最终金额
     sales_shipping = float(sales_row[4]) if sales_row else 0
     sales_storage_fee = float(sales_row[5]) if sales_row else 0
+    sales_other_fee = float(sales_row[6]) if sales_row else 0
     
     # 销售利润（从批次追溯计算）
-    # 利润 = 商品销售金额 - 批次成本 - 销售运费 - 销售冷藏费
+    # 利润 = 商品销售金额 - 批次成本 - 销售运费 - 销售冷藏费 - 其他费用
     sales_cost_result = await db.execute(
         select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
         .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
@@ -778,14 +836,21 @@ async def get_entity_trading(
         .where(and_(*sales_conditions))
     )
     sales_cost = float(sales_cost_result.scalar() or 0)
-    sales_profit = sales_product_amount - sales_cost - sales_shipping - sales_storage_fee
+    sales_profit = sales_product_amount - sales_cost - sales_shipping - sales_storage_fee - sales_other_fee
+    
+    # 采购统计的日期条件（采购单按装货日期）
+    purchase_date_conditions = []
+    if start_dt:
+        purchase_date_conditions.append(BusinessOrder.loading_date >= start_dt)
+    if end_dt:
+        purchase_date_conditions.append(BusinessOrder.loading_date < end_dt)
     
     # 采购统计（作为供应商：source_id = entity_id）
     purchase_conditions = [
         BusinessOrder.order_type == "purchase",
         BusinessOrder.status == "completed",
         BusinessOrder.source_id == entity_id,
-        *date_conditions
+        *purchase_date_conditions
     ]
     
     purchase_result = await db.execute(
@@ -855,8 +920,8 @@ async def get_entity_trading(
             "product_name": row[1],
             "product_code": row[2],
             "unit": row[3],
-            "specification": row[4],  # 商品规格
-            "spec_name": row[5],      # 包装规格
+            "specification": row[4] or "",  # 商品规格
+            "spec_name": row[5] or "",      # 包装规格
             "container_name": row[6],
             "unit_quantity": float(row[7]) if row[7] else None,
             "base_unit_symbol": row[8],
@@ -900,8 +965,8 @@ async def get_entity_trading(
             "product_name": row[1],
             "product_code": row[2],
             "unit": row[3],
-            "specification": row[4],  # 商品规格
-            "spec_name": row[5],      # 包装规格
+            "specification": row[4] or "",  # 商品规格
+            "spec_name": row[5] or "",      # 包装规格
             "container_name": row[6],
             "unit_quantity": float(row[7]) if row[7] else None,
             "base_unit_symbol": row[8],
@@ -911,15 +976,32 @@ async def get_entity_trading(
         for row in purchase_products_result
     ]
     
-    # 最近订单
+    # 最近订单（按各自的业务日期筛选和排序）
+    # 销售单按卸货日期，采购单按装货日期
+    recent_date_filter = []
+    if start_dt:
+        recent_date_filter.append(
+            or_(
+                and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date >= start_dt),
+                and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date >= start_dt)
+            )
+        )
+    if end_dt:
+        recent_date_filter.append(
+            or_(
+                and_(BusinessOrder.order_type == "sale", BusinessOrder.unloading_date < end_dt),
+                and_(BusinessOrder.order_type == "purchase", BusinessOrder.loading_date < end_dt)
+            )
+        )
+    
     recent_orders_result = await db.execute(
         select(BusinessOrder).where(
             and_(
                 BusinessOrder.status == "completed",
                 (BusinessOrder.target_id == entity_id) | (BusinessOrder.source_id == entity_id),
-                *date_conditions
+                *recent_date_filter
             )
-        ).order_by(BusinessOrder.order_date.desc()).limit(20)
+        ).order_by(BusinessOrder.created_at.desc()).limit(20)
     )
     
     recent_orders = [
@@ -930,7 +1012,9 @@ async def get_entity_trading(
             "type_display": o.type_display,
             "quantity": float(o.total_quantity or 0),
             "amount": float(o.final_amount or 0),
-            "date": o.order_date.strftime("%Y-%m-%d") if o.order_date else ""
+            # 销售单显示卸货日期，采购单显示装货日期
+            "date": (o.unloading_date.strftime("%Y-%m-%d") if o.order_type == "sale" and o.unloading_date else 
+                    (o.loading_date.strftime("%Y-%m-%d") if o.order_type == "purchase" and o.loading_date else ""))
         }
         for o in recent_orders_result.scalars().all()
     ]
@@ -953,7 +1037,7 @@ async def get_entity_trading(
             "quantity": sales_quantity,
             "amount": sales_amount,
             "profit": sales_profit,
-            "profit_rate": max(-999, min(999, round(sales_profit / sales_product_amount * 100, 2))) if sales_product_amount > 0 else 0,
+            "profit_rate": round(sales_profit / sales_amount * 100, 2) if sales_amount > 0 else 0,
             "products": sales_products
         },
         "purchase": {
@@ -964,6 +1048,217 @@ async def get_entity_trading(
         },
         "recent_orders": recent_orders
     }
+
+
+@router.get("/entity-trading-summary/{entity_type}")
+async def get_entity_trading_summary(
+    *,
+    db: AsyncSession = Depends(get_db),
+    entity_type: str,  # "customer" 或 "supplier"
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None)
+) -> Any:
+    """
+    获取全部客户或全部供应商的交易汇总
+    - entity_type: "customer" - 全部客户的销售汇总
+    - entity_type: "supplier" - 全部供应商的采购汇总
+    """
+    # 解析日期
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) if end_date else None
+    
+    if entity_type == "customer":
+        # 全部客户 - 销售统计
+        date_conditions = []
+        if start_dt:
+            date_conditions.append(BusinessOrder.unloading_date >= start_dt)
+        if end_dt:
+            date_conditions.append(BusinessOrder.unloading_date < end_dt)
+        
+        conditions = [
+            BusinessOrder.order_type == "sale",
+            BusinessOrder.status == "completed",
+            *date_conditions
+        ]
+        
+        # 汇总统计
+        result = await db.execute(
+            select(
+                func.count(BusinessOrder.id),
+                func.coalesce(func.sum(BusinessOrder.total_quantity), 0),
+                func.coalesce(func.sum(BusinessOrder.total_amount), 0),
+                func.coalesce(func.sum(BusinessOrder.final_amount), 0),
+                func.coalesce(func.sum(BusinessOrder.total_shipping), 0),
+                func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0),
+                func.coalesce(func.sum(BusinessOrder.other_fee), 0)
+            ).where(and_(*conditions))
+        )
+        row = result.first()
+        order_count = row[0] if row else 0
+        quantity = float(row[1]) if row else 0
+        product_amount = float(row[2]) if row else 0
+        amount = float(row[3]) if row else 0
+        shipping = float(row[4]) if row else 0
+        storage_fee = float(row[5]) if row else 0
+        other_fee = float(row[6]) if row else 0
+        
+        # 销售成本
+        cost_result = await db.execute(
+            select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+            .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+            .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(*conditions))
+        )
+        cost = float(cost_result.scalar() or 0)
+        profit = product_amount - cost - shipping - storage_fee - other_fee
+        
+        # 按商品分组统计
+        products_result = await db.execute(
+            select(
+                Product.id,
+                Product.name,
+                Product.code,
+                Product.unit,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("quantity"),
+                func.coalesce(func.sum(OrderItem.amount), 0).label("amount")
+            ).join(
+                OrderItem, Product.id == OrderItem.product_id
+            ).join(
+                BusinessOrder, OrderItem.order_id == BusinessOrder.id
+            ).where(
+                and_(*conditions)
+            ).group_by(
+                Product.id, Product.name, Product.code, Product.unit
+            ).order_by(
+                func.sum(OrderItem.amount).desc()
+            ).limit(20)
+        )
+        
+        products = []
+        for prow in products_result:
+            product_id = prow[0]
+            p_amount = float(prow[5])
+            
+            # 商品成本
+            p_cost_result = await db.execute(
+                select(func.coalesce(func.sum(OrderItemBatch.cost_amount), 0))
+                .join(OrderItem, OrderItemBatch.order_item_id == OrderItem.id)
+                .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
+                .where(and_(
+                    OrderItem.product_id == product_id,
+                    *conditions
+                ))
+            )
+            p_cost = float(p_cost_result.scalar() or 0)
+            
+            products.append({
+                "product_id": product_id,
+                "product_name": prow[1],
+                "product_code": prow[2],
+                "unit": prow[3],
+                "quantity": float(prow[4]),
+                "amount": p_amount,
+                "profit": p_amount - p_cost
+            })
+        
+        return {
+            "entity": {
+                "id": 0,
+                "name": "全部客户",
+                "code": "ALL_CUSTOMERS",
+                "entity_type": "customer"
+            },
+            "date_range": {"start_date": start_date, "end_date": end_date},
+            "sales": {
+                "order_count": order_count,
+                "quantity": quantity,
+                "amount": amount,
+                "profit": profit,
+                "profit_rate": round(profit / amount * 100, 2) if amount > 0 else 0,
+                "products": products
+            },
+            "purchase": {"order_count": 0, "quantity": 0, "amount": 0, "products": []},
+            "recent_orders": []
+        }
+    
+    else:  # supplier
+        # 全部供应商 - 采购统计
+        date_conditions = []
+        if start_dt:
+            date_conditions.append(BusinessOrder.loading_date >= start_dt)
+        if end_dt:
+            date_conditions.append(BusinessOrder.loading_date < end_dt)
+        
+        conditions = [
+            BusinessOrder.order_type == "purchase",
+            BusinessOrder.status == "completed",
+            *date_conditions
+        ]
+        
+        # 汇总统计
+        result = await db.execute(
+            select(
+                func.count(BusinessOrder.id),
+                func.coalesce(func.sum(BusinessOrder.total_quantity), 0),
+                func.coalesce(func.sum(BusinessOrder.final_amount), 0)
+            ).where(and_(*conditions))
+        )
+        row = result.first()
+        order_count = row[0] if row else 0
+        quantity = float(row[1]) if row else 0
+        amount = float(row[2]) if row else 0
+        
+        # 按商品分组统计
+        products_result = await db.execute(
+            select(
+                Product.id,
+                Product.name,
+                Product.code,
+                Product.unit,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("quantity"),
+                func.coalesce(func.sum(OrderItem.amount), 0).label("amount")
+            ).join(
+                OrderItem, Product.id == OrderItem.product_id
+            ).join(
+                BusinessOrder, OrderItem.order_id == BusinessOrder.id
+            ).where(
+                and_(*conditions)
+            ).group_by(
+                Product.id, Product.name, Product.code, Product.unit
+            ).order_by(
+                func.sum(OrderItem.amount).desc()
+            ).limit(20)
+        )
+        
+        products = [
+            {
+                "product_id": prow[0],
+                "product_name": prow[1],
+                "product_code": prow[2],
+                "unit": prow[3],
+                "quantity": float(prow[4]),
+                "amount": float(prow[5])
+            }
+            for prow in products_result
+        ]
+        
+        return {
+            "entity": {
+                "id": 0,
+                "name": "全部供应商",
+                "code": "ALL_SUPPLIERS",
+                "entity_type": "supplier"
+            },
+            "date_range": {"start_date": start_date, "end_date": end_date},
+            "sales": {"order_count": 0, "quantity": 0, "amount": 0, "profit": 0, "profit_rate": 0, "products": []},
+            "purchase": {
+                "order_count": order_count,
+                "quantity": quantity,
+                "amount": amount,
+                "products": products
+            },
+            "recent_orders": []
+        }
 
 
 @router.get("/product-rank", response_model=ProductRankResponse)
@@ -980,11 +1275,11 @@ async def get_product_rank(
         BusinessOrder.status == "completed"
     ]
     
-    # 使用业务日期（order_date）筛选，而非完成时间
+    # 销售按卸货日期筛选
     if start_date:
-        conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.unloading_date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        conditions.append(BusinessOrder.order_date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        conditions.append(BusinessOrder.unloading_date <= datetime.strptime(end_date, "%Y-%m-%d"))
     
     order_field = func.sum(OrderItem.profit) if rank_type == "profit" else func.sum(OrderItem.quantity)
     
@@ -1037,13 +1332,23 @@ async def get_product_trading(
     获取商品进销统计
     包含：采购数量/金额、销售数量/金额、库存、毛利
     """
-    # 基础条件
-    date_conditions = []
-    if start_date:
-        date_conditions.append(BusinessOrder.order_date >= datetime.strptime(start_date, "%Y-%m-%d"))
-    if end_date:
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        date_conditions.append(BusinessOrder.order_date < end_dt)
+    # 解析日期
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) if end_date else None
+    
+    # 采购日期条件（按装货日期）
+    purchase_date_conditions = []
+    if start_dt:
+        purchase_date_conditions.append(BusinessOrder.loading_date >= start_dt)
+    if end_dt:
+        purchase_date_conditions.append(BusinessOrder.loading_date < end_dt)
+    
+    # 销售日期条件（按卸货日期）
+    sales_date_conditions = []
+    if start_dt:
+        sales_date_conditions.append(BusinessOrder.unloading_date >= start_dt)
+    if end_dt:
+        sales_date_conditions.append(BusinessOrder.unloading_date < end_dt)
     
     # 查询所有商品
     product_query = select(Product).where(Product.is_active == True)
@@ -1067,12 +1372,12 @@ async def get_product_trading(
     total_stock = Decimal("0")
     
     for product in products:
-        # 采购统计
+        # 采购统计（按装货日期）
         purchase_conditions = [
             BusinessOrder.order_type == "purchase",
             BusinessOrder.status == "completed",
             OrderItem.product_id == product.id,
-            *date_conditions
+            *purchase_date_conditions
         ]
         purchase_result = await db.execute(
             select(
@@ -1085,12 +1390,12 @@ async def get_product_trading(
         purchase_qty = int(purchase_row[0]) if purchase_row else 0
         purchase_amt = Decimal(str(purchase_row[1])) if purchase_row else Decimal("0")
         
-        # 销售统计
+        # 销售统计（按卸货日期）
         sale_conditions = [
             BusinessOrder.order_type == "sale",
             BusinessOrder.status == "completed",
             OrderItem.product_id == product.id,
-            *date_conditions
+            *sales_date_conditions
         ]
         sale_result = await db.execute(
             select(
@@ -1112,40 +1417,33 @@ async def get_product_trading(
                 BusinessOrder.order_type == "sale",
                 BusinessOrder.status == "completed",
                 OrderItem.product_id == product.id,
-                *date_conditions
+                *sales_date_conditions
             ))
         )
         cost_amt = Decimal(str(cost_result.scalar() or 0))
         
-        # 获取该商品对应订单的运费和冷藏费（按商品金额比例分摊）
-        fees_result = await db.execute(
+        # 计算该商品分摊的运费、冷藏费和其他费用
+        # 按商品明细金额占订单商品总金额的比例分摊
+        fee_share_result = await db.execute(
             select(
-                func.coalesce(func.sum(BusinessOrder.total_shipping), 0),
-                func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0),
-                func.coalesce(func.sum(BusinessOrder.total_amount), 0)  # 订单总商品金额
+                func.coalesce(func.sum(
+                    (OrderItem.amount / func.nullif(BusinessOrder.total_amount, 0)) * 
+                    (BusinessOrder.total_shipping + BusinessOrder.total_storage_fee + BusinessOrder.other_fee)
+                ), 0)
             )
-            .join(OrderItem, OrderItem.order_id == BusinessOrder.id)
+            .join(BusinessOrder, OrderItem.order_id == BusinessOrder.id)
             .where(and_(
                 BusinessOrder.order_type == "sale",
                 BusinessOrder.status == "completed",
                 OrderItem.product_id == product.id,
-                *date_conditions
+                BusinessOrder.total_amount > 0,
+                *sales_date_conditions
             ))
         )
-        fees_row = fees_result.first()
-        total_shipping = Decimal(str(fees_row[0])) if fees_row else Decimal("0")
-        total_storage_fee = Decimal(str(fees_row[1])) if fees_row else Decimal("0")
-        order_total_amount = Decimal(str(fees_row[2])) if fees_row else Decimal("0")
+        fee_share = Decimal(str(fee_share_result.scalar() or 0))
         
-        # 按商品金额占订单总金额的比例分摊运费和冷藏费
-        if order_total_amount > 0 and sale_amt > 0:
-            fee_ratio = sale_amt / order_total_amount
-            allocated_fees = (total_shipping + total_storage_fee) * fee_ratio
-        else:
-            allocated_fees = Decimal("0")
-        
-        # 利润 = 销售金额 - 批次成本 - 分摊的运费和冷藏费
-        profit = sale_amt - cost_amt - allocated_fees
+        # 利润 = 销售金额 - 批次成本 - 分摊费用（运费+冷藏费+其他费用）
+        profit = sale_amt - cost_amt - fee_share
         
         # 库存
         stock_result = await db.execute(
@@ -1160,6 +1458,7 @@ async def get_product_trading(
                 "product_id": product.id,
                 "product_code": product.code,
                 "product_name": product.name,
+                "product_specification": product.specification or "",
                 "category_name": product.category or "",
                 "base_unit": product.unit or "个",
                 "purchase_qty": purchase_qty,
@@ -1167,7 +1466,7 @@ async def get_product_trading(
                 "sale_qty": sale_qty,
                 "sale_amount": float(sale_amt),
                 "profit": float(profit),
-                "profit_rate": max(-999, min(999, round(float(profit / sale_amt * 100), 2))) if sale_amt > 0 else 0,
+                "profit_rate": round(float(profit / sale_amt * 100), 2) if sale_amt > 0 else 0,
                 "stock_qty": float(stock_qty),
                 "avg_purchase_price": round(float(purchase_amt / purchase_qty), 2) if purchase_qty > 0 else 0,
                 "avg_sale_price": round(float(sale_amt / sale_qty), 2) if sale_qty > 0 else 0,
@@ -1189,7 +1488,7 @@ async def get_product_trading(
             "total_sale_qty": total_sale_qty,
             "total_sale_amount": float(total_sale_amt),
             "total_profit": float(total_profit),
-            "total_profit_rate": max(-999, min(999, round(float(total_profit / total_sale_amt * 100), 2))) if total_sale_amt > 0 else 0,
+            "total_profit_rate": round(float(total_profit / total_sale_amt * 100), 2) if total_sale_amt > 0 else 0,
             "total_stock": float(total_stock)
         },
         "date_range": {

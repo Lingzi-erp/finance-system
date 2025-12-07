@@ -11,7 +11,8 @@ import {
 } from '@/lib/api/v3';
 import { 
   CreditCard, Plus, Edit, Trash2, Check, X, 
-  Building2, Users, Star, AlertCircle
+  Building2, Users, Star, AlertCircle,
+  TrendingUp, TrendingDown, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -162,7 +163,7 @@ export default function PaymentMethodsPage() {
   };
 
   const formatAmount = (amount: number) => 
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
   if (loading && methods.length === 0) {
     return (
@@ -199,6 +200,54 @@ export default function PaymentMethodsPage() {
             </Button>
           </div>
         </div>
+
+        {/* 总结余汇总卡片 */}
+        {methods.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                <Wallet className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">总结余</p>
+                <p className={`text-lg font-bold ${methods.reduce((s, m) => s + m.balance, 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {formatAmount(methods.reduce((s, m) => s + m.balance, 0))}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">累计收款</p>
+                <p className="text-lg font-bold text-green-600">
+                  {formatAmount(methods.reduce((s, m) => s + m.total_received, 0))}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                <TrendingDown className="w-5 h-5 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">累计付款</p>
+                <p className="text-lg font-bold text-orange-600">
+                  {formatAmount(methods.reduce((s, m) => s + m.total_paid, 0))}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <CreditCard className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">收付款方式</p>
+                <p className="text-lg font-bold text-blue-600">{methods.length} 种</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 筛选区域 */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
@@ -248,6 +297,20 @@ export default function PaymentMethodsPage() {
                 </div>
               </div>
               
+              {/* 结余信息 */}
+              <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-500">结余</span>
+                  <span className={`text-lg font-bold ${method.balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatAmount(method.balance)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>收 {formatAmount(method.total_received)}</span>
+                  <span>付 {formatAmount(method.total_paid)}</span>
+                </div>
+              </div>
+
               {/* 详细信息 */}
               <div className="space-y-1 text-sm text-gray-600 mb-4">
                 {method.bank_name && (

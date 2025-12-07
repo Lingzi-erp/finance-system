@@ -66,7 +66,7 @@ export default function AgingAnalysisPage() {
   };
   
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value);
+    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   };
   
   const getAgingColor = (bucket: string) => {

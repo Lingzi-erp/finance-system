@@ -26,6 +26,7 @@ from app.models.v3.unit import UnitGroup, Unit, CompositeUnit
 from app.models.v3.product_spec import ProductSpec
 from app.models.v3.specification import Specification
 from app.models.v3.stock_batch import OrderItemBatch
+from app.db.migrations import run_migrations, CURRENT_DB_VERSION
 
 router = APIRouter()
 
@@ -169,6 +170,17 @@ async def init_demo_data(
         box = Unit(group_id=count_group.id, name="箱", symbol="箱", conversion_rate=1.0, is_base=False, is_active=True)
         db.add(pcs)
         db.add(box)
+        await db.flush()
+        
+        # ========== 3.5 创建默认收付款方式 ==========
+        pm_cash = PaymentMethod(name="现金", method_type="cash", is_default=True, sort_order=1, created_by=admin_id)
+        pm_bank = PaymentMethod(name="银行转账", method_type="bank", sort_order=2, created_by=admin_id)
+        pm_wechat = PaymentMethod(name="微信收款", method_type="wechat", sort_order=3, created_by=admin_id)
+        pm_alipay = PaymentMethod(name="支付宝收款", method_type="alipay", sort_order=4, created_by=admin_id)
+        db.add(pm_cash)
+        db.add(pm_bank)
+        db.add(pm_wechat)
+        db.add(pm_alipay)
         await db.flush()
         
         # ========== 4. 创建商品分类 ==========
@@ -648,3 +660,52 @@ async def recalculate_accounts(
         "accounts_created": account_count,
         "entities_updated": len(entity_balances)
     }
+
+
+@router.post("/upgrade-database")
+async def upgrade_database(
+    *,
+    db: AsyncSession = Depends(get_db),
+    confirm: bool = Query(False, description="确认执行")
+) -> Any:
+    """
+    手动触发数据库升级
+    
+    此操作会：
+    1. 检查并添加缺失的数据库列
+    2. 修复/更新基础配置数据（扣重公式等）
+    3. 确保系统客商存在（杂费支出等）
+    
+    不会影响用户的业务数据。
+    """
+    if not confirm:
+        return {
+            "preview": True,
+            "message": "预览模式 - 将检查并升级数据库结构",
+            "current_version": CURRENT_DB_VERSION,
+            "tip": "添加 ?confirm=true 参数确认执行"
+        }
+    
+    try:
+        result = await run_migrations(db)
+        
+        # 汇总结果
+        summary = {
+            "success": True,
+            "message": "数据库升级完成",
+            "old_version": result.get("old_version"),
+            "new_version": result.get("new_version"),
+            "columns_added": len(result.get("columns_added", [])),
+            "columns_detail": result.get("columns_added", []),
+            "formulas_fixed": result.get("formulas_fixed", {}),
+            "system_entity": result.get("misc_expense_entity", {}),
+            "errors": result.get("errors", [])
+        }
+        
+        if summary["errors"]:
+            summary["message"] = f"数据库升级完成，但有 {len(summary['errors'])} 个警告"
+        
+        return summary
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据库升级失败: {str(e)}")

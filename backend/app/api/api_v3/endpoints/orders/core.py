@@ -81,6 +81,7 @@ def build_order_response(order: BusinessOrder) -> BusinessOrderResponse:
         total_amount=float(order.total_amount or 0),
         total_shipping=float(order.total_shipping or 0),
         total_storage_fee=float(order.total_storage_fee or 0),
+        other_fee=float(order.other_fee or 0),
         final_amount=float(order.final_amount or 0),
         loading_date=order.loading_date,
         unloading_date=order.unloading_date,
@@ -353,5 +354,6 @@ async def set_order_items(
     order.total_shipping = total_shipping
     total_discount = order.total_discount or Decimal("0")
     total_storage_fee = order.total_storage_fee or Decimal("0")
-    order.final_amount = total_amount + total_shipping + total_storage_fee - total_discount
+    other_fee = order.other_fee or Decimal("0")
+    order.final_amount = total_amount + total_shipping + total_storage_fee + other_fee - total_discount
 

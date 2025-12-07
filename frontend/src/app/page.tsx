@@ -33,7 +33,7 @@ export default function Dashboard() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   };
 
   const formatCompactAmount = (amount: number) => {

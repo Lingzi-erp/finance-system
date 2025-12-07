@@ -305,7 +305,7 @@ export default function InitialDataPage() {
                   >
                     <option value="">选择商品</option>
                     {products.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                      <option key={p.id} value={p.id}>{p.name}{p.specification ? ` [${p.specification}]` : ''} ({p.code})</option>
                     ))}
                   </select>
                 </div>
@@ -352,7 +352,14 @@ export default function InitialDataPage() {
                   {stockList.map(item => (
                     <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <div>
-                        <div className="font-medium text-gray-900">{item.product_name}</div>
+                        <div className="font-medium text-gray-900">
+                          {item.product_name}
+                          {item.product_specification && (
+                            <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                              {item.product_specification}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-sm text-gray-500">{item.warehouse_name}</div>
                       </div>
                       <div className="text-right">

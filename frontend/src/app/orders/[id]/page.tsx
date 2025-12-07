@@ -199,7 +199,7 @@ export default function OrderDetailPage() {
     }
   };
 
-  const formatCurrency = (amount?: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(amount || 0);
+  const formatCurrency = (amount?: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   const formatDateTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '-';
   const rawActions = order ? ACTIONS_BY_STATUS[order.status] ?? [] : [];
   const isAdmin = true;
@@ -254,7 +254,14 @@ export default function OrderDetailPage() {
                           return (
                             <tr key={item.id} className="border-t border-ink-light/50">
                               <td className="px-3 py-2">
-                                <p className="font-medium text-ink-black">{item.product_name}</p>
+                                <p className="font-medium text-ink-black">
+                                  {item.product_name}
+                                  {item.spec_name && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+                                      {item.spec_name}
+                                    </span>
+                                  )}
+                                </p>
                                 <p className="text-xs text-ink-medium">{item.product_code} · {item.product_unit}</p>
                               </td>
                               <td className="px-3 py-2 text-center">{item.quantity}</td>
@@ -354,7 +361,7 @@ export default function OrderDetailPage() {
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex flex-col gap-2">
             <Button variant="ghost" className="w-fit px-0 text-ink-medium hover:text-ink-black" onClick={() => router.push('/orders')}><ArrowLeft className="w-4 h-4 mr-2" />返回业务单列表</Button>
-            <div><div className="flex items-center gap-3 flex-wrap"><h1 className="text-2xl font-bold text-ink-black flex items-center gap-2"><FileText className="w-6 h-6 text-amber-600" />{order.order_no}</h1><span className={`text-xs px-2 py-1 rounded ${ORDER_TYPE_MAP[order.order_type]?.color || 'bg-gray-100'}`}>{order.type_display}</span><span className={`text-xs px-2 py-1 rounded ${ORDER_STATUS_MAP[order.status]?.color || 'bg-gray-100'}`}>{order.status_display}</span></div><p className="text-ink-medium mt-1">业务日期：{new Date(order.order_date).toLocaleDateString('zh-CN')}</p></div>
+            <div><div className="flex items-center gap-3 flex-wrap"><h1 className="text-2xl font-bold text-ink-black flex items-center gap-2"><FileText className="w-6 h-6 text-amber-600" />{order.order_no}</h1><span className={`text-xs px-2 py-1 rounded ${ORDER_TYPE_MAP[order.order_type]?.color || 'bg-gray-100'}`}>{order.type_display}</span><span className={`text-xs px-2 py-1 rounded ${ORDER_STATUS_MAP[order.status]?.color || 'bg-gray-100'}`}>{order.status_display}</span></div><p className="text-ink-medium mt-1">{order.order_type === 'purchase' ? '装货日期' : '卸货日期'}：{order.order_type === 'purchase' ? (order.loading_date ? new Date(order.loading_date).toLocaleDateString('zh-CN') : '-') : (order.unloading_date ? new Date(order.unloading_date).toLocaleDateString('zh-CN') : '-')}</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
             {/* 管理员超删按钮 - 只有已完成的单据才显示 */}
@@ -466,15 +473,20 @@ export default function OrderDetailPage() {
                   <p className="text-xl font-bold text-slate-900">{formatCurrency(order.total_storage_fee)}</p>
                 </div>
               )}
+              {order.other_fee > 0 && (
+                <div className="min-w-[100px]">
+                  <p className="text-sm text-slate-500 mb-1">其他费用</p>
+                  <p className="text-xl font-bold text-slate-900">{formatCurrency(order.other_fee)}</p>
+                </div>
+              )}
               <div className="ml-auto bg-gradient-to-br from-amber-50 to-orange-50 -m-3 p-3 rounded-xl border border-amber-100">
                 <p className="text-sm text-amber-700 mb-1 font-medium">应收/应付总额</p>
                 <p className="text-2xl font-bold text-amber-700">{formatCurrency(order.final_amount)}</p>
               </div>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-6 text-sm text-slate-500">
-              <span>业务日期：{new Date(order.order_date).toLocaleDateString('zh-CN')}</span>
-              {order.loading_date && <span>装货：{new Date(order.loading_date).toLocaleDateString('zh-CN')}</span>}
-              {order.unloading_date && <span>卸货：{new Date(order.unloading_date).toLocaleDateString('zh-CN')}</span>}
+              {order.loading_date && <span>装货日期：{new Date(order.loading_date).toLocaleDateString('zh-CN')}</span>}
+              {order.unloading_date && <span>卸货日期：{new Date(order.unloading_date).toLocaleDateString('zh-CN')}</span>}
             </div>
           </div>
         </div>

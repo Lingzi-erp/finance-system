@@ -13,6 +13,7 @@ from app.core.deps import get_db
 from app.models.v3.entity import Entity
 from app.models.v3.product import Product
 from app.models.v3.stock import Stock, StockFlow
+from app.models.v3.stock_batch import StockBatch
 from app.models.v3.account_balance import AccountBalance
 
 router = APIRouter()
@@ -54,6 +55,7 @@ class InitialStockResponse(BaseModel):
     product_id: int
     product_name: str
     product_code: str
+    product_specification: str = ""  # 商品规格
     quantity: float
     notes: Optional[str]
     created_at: datetime
@@ -279,34 +281,46 @@ async def list_initial_stocks(
     db: AsyncSession = Depends(get_db),
     warehouse_id: Optional[int] = Query(None, description="按仓库筛选")
 ) -> Any:
-    """获取期初库存列表（所有有库存的记录）"""
+    """获取期初库存列表（只返回期初录入的记录）"""
+    # 方法1: 查询 StockFlow 表中 flow_type='initial' 的记录
     query = (
-        select(Stock)
-        .options(selectinload(Stock.warehouse), selectinload(Stock.product))
-        .where(Stock.quantity > 0)
+        select(StockFlow)
+        .options(
+            selectinload(StockFlow.stock).selectinload(Stock.warehouse),
+            selectinload(StockFlow.stock).selectinload(Stock.product)
+        )
+        .where(StockFlow.flow_type == "initial")
     )
     
-    if warehouse_id:
-        query = query.where(Stock.warehouse_id == warehouse_id)
-    
     result = await db.execute(query)
-    stocks = result.scalars().all()
+    flows = result.scalars().all()
+    
+    # 按 stock_id 聚合（同一个库存可能有多次期初调整）
+    stock_map = {}
+    for flow in flows:
+        stock = flow.stock
+        if not stock:
+            continue
+        if warehouse_id and stock.warehouse_id != warehouse_id:
+            continue
+        
+        # 保留最新的记录
+        if stock.id not in stock_map or flow.operated_at > stock_map[stock.id]["created_at"]:
+            stock_map[stock.id] = {
+                "id": stock.id,
+                "warehouse_id": stock.warehouse_id,
+                "warehouse_name": stock.warehouse.name if stock.warehouse else "",
+                "product_id": stock.product_id,
+                "product_name": stock.product.name if stock.product else "",
+                "product_code": stock.product.code if stock.product else "",
+                "product_specification": (stock.product.specification or "") if stock.product else "",
+                "quantity": float(flow.quantity_after),
+                "created_at": flow.operated_at
+            }
     
     return {
-        "data": [
-            {
-                "id": s.id,
-                "warehouse_id": s.warehouse_id,
-                "warehouse_name": s.warehouse.name if s.warehouse else "",
-                "product_id": s.product_id,
-                "product_name": s.product.name if s.product else "",
-                "product_code": s.product.code if s.product else "",
-                "quantity": float(s.quantity),
-                "created_at": s.created_at
-            }
-            for s in stocks
-        ],
-        "total": len(stocks)
+        "data": list(stock_map.values()),
+        "total": len(stock_map)
     }
 
 
@@ -600,14 +614,12 @@ async def get_initial_data_summary(
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """获取期初数据汇总"""
-    # 期初库存统计
+    # 期初库存统计 - 只统计 flow_type='initial' 的记录
     stock_result = await db.execute(
-        select(
-            func.count(Stock.id),
-            func.coalesce(func.sum(Stock.quantity), 0)
-        ).where(Stock.quantity > 0)
+        select(func.count(func.distinct(StockFlow.stock_id)))
+        .where(StockFlow.flow_type == "initial")
     )
-    stock_row = stock_result.first()
+    stock_count = stock_result.scalar() or 0
     
     # 期初应收统计
     receivable_result = await db.execute(
@@ -637,8 +649,8 @@ async def get_initial_data_summary(
     
     return {
         "stock": {
-            "count": stock_row[0] if stock_row else 0,
-            "total_quantity": float(stock_row[1]) if stock_row else 0
+            "count": stock_count,
+            "total_quantity": 0  # 不再汇总数量，因为期初调整可能有增有减
         },
         "receivable": {
             "count": receivable_row[0] if receivable_row else 0,

@@ -19,6 +19,7 @@ export interface PaymentRecord {
   method_display: string;
   entity_name: string;
   entity_code: string;
+  order_id?: number;
   order_no: string;
   created_by: number;
   creator_name: string;

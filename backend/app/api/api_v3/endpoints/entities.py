@@ -147,6 +147,10 @@ async def update_entity(
     if not entity:
         raise HTTPException(status_code=404, detail="实体不存在")
     
+    # 系统内置实体不能编辑
+    if entity.is_system:
+        raise HTTPException(status_code=400, detail="系统内置客商不能编辑")
+    
     update_data = entity_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(entity, field, value)
@@ -169,6 +173,10 @@ async def delete_entity(
     entity = await db.get(Entity, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail="实体不存在")
+    
+    # 系统内置实体不能删除
+    if entity.is_system:
+        raise HTTPException(status_code=400, detail="系统内置客商不能删除")
     
     # 检查是否有关联的业务单（作为来源或目标）
     orders_count = (await db.execute(

@@ -64,7 +64,7 @@ export default function OrdersPage() {
     }
   };
 
-  const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+  const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
   if (loading && orders.length === 0) {
     return (
@@ -202,7 +202,13 @@ export default function OrdersPage() {
                         {order.status_display}
                       </span>
                     </td>
-                    <td className="text-slate-500">{new Date(order.order_date).toLocaleDateString('zh-CN')}</td>
+                    <td className="text-slate-500">
+                      {/* 采购单显示装货日期，销售单显示卸货日期 */}
+                      {order.order_type === 'purchase' 
+                        ? (order.loading_date ? new Date(order.loading_date).toLocaleDateString('zh-CN') : '-')
+                        : (order.unloading_date ? new Date(order.unloading_date).toLocaleDateString('zh-CN') : '-')
+                      }
+                    </td>
                     <td>
                       <div className="flex justify-center gap-1">
                         <Link href={`/orders/${order.id}`}>
