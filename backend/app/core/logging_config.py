@@ -50,7 +50,10 @@ def setup_logging(log_level: str = "INFO"):
     root_logger.handlers.clear()
     
     # 控制台处理器（彩色输出）
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Windows 下强制使用 UTF-8 编码避免 emoji 输出错误
+    import io
+    console_stream = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(logging.DEBUG)
     console_handler.setFormatter(ColoredFormatter(LOG_FORMAT, DATE_FORMAT))
     root_logger.addHandler(console_handler)
@@ -78,7 +81,7 @@ def setup_logging(log_level: str = "INFO"):
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     
-    logging.info("📋 日志系统初始化完成")
+    logging.info("[OK] 日志系统初始化完成")
 
 
 def get_logger(name: str) -> logging.Logger:

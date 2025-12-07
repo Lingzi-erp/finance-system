@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.2"
+CURRENT_DB_VERSION = "1.2.3"
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -113,7 +113,7 @@ async def add_column_if_not_exists(
             sql += f" DEFAULT {default}"
         await db.execute(text(sql))
         await db.commit()
-        logger.info(f"✅ 已添加列: {table}.{column}")
+        logger.info(f"[+] 已添加列: {table}.{column}")
         return True
     except Exception as e:
         # 单列添加失败不应该影响其他列，回滚并继续

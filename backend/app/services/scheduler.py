@@ -65,7 +65,7 @@ def auto_backup():
         stat = os.stat(backup_path)
         size_mb = stat.st_size / 1024 / 1024
         
-        logger.info(f"✅ 自动备份完成: {backup_filename} ({size_mb:.2f} MB)")
+        logger.info(f"[OK] 自动备份完成: {backup_filename} ({size_mb:.2f} MB)")
         
         # 清理旧的自动备份（保留最近 N 个）
         cleanup_old_backups(backup_dir, keep_count=settings.AUTO_BACKUP_KEEP_COUNT)
@@ -107,7 +107,7 @@ def init_scheduler():
     global scheduler
     
     if not settings.AUTO_BACKUP_ENABLED:
-        logger.info("📦 自动备份已禁用")
+        logger.info("[INFO] 自动备份已禁用")
         return
     
     scheduler = AsyncIOScheduler()
@@ -126,7 +126,7 @@ def init_scheduler():
     )
     
     scheduler.start()
-    logger.info(f"⏰ 定时任务调度器已启动 - 自动备份时间: 每天 {settings.AUTO_BACKUP_HOUR:02d}:{settings.AUTO_BACKUP_MINUTE:02d}")
+    logger.info(f"[SCHEDULER] 定时任务调度器已启动 - 自动备份时间: 每天 {settings.AUTO_BACKUP_HOUR:02d}:{settings.AUTO_BACKUP_MINUTE:02d}")
 
 
 def shutdown_scheduler():
@@ -134,7 +134,7 @@ def shutdown_scheduler():
     global scheduler
     if scheduler:
         scheduler.shutdown()
-        logger.info("⏰ 定时任务调度器已关闭")
+        logger.info("[SCHEDULER] 定时任务调度器已关闭")
 
 
 def get_scheduler_status() -> dict:

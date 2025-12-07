@@ -23,9 +23,13 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.2';
-const BUILD_DATE = '2024-12-07';
+const APP_VERSION = '1.2.3';
+const BUILD_DATE = '2024-12-08';
 const CHANGELOG = [
+  { version: '1.2.3', date: '2024-12-08', changes: [
+    '修复Windows下后端启动失败的问题（Unicode编码错误）',
+    '优化日志输出兼容性'
+  ]},
   { version: '1.2.2', date: '2024-12-07', changes: [
     '全面修复规格显示：批次追溯、商品进销统计、库存流水、期初数据等',
     '新增其他费用字段（订单附加费用，自动生成杂费账款）',

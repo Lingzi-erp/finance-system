@@ -21,12 +21,12 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
-    logger.info("🚀 应用启动中...")
+    logger.info("[STARTING] 应用启动中...")
     
     # 确保数据库表存在
     try:
         await ensure_tables_exist()
-        logger.info("📊 数据库表已就绪")
+        logger.info("[DB] 数据库表已就绪")
     except Exception as e:
         logger.warning(f"数据库表初始化警告: {e}")
     
@@ -37,20 +37,20 @@ async def lifespan(app: FastAPI):
             
             # 报告列更新
             if result.get("columns_added"):
-                logger.info(f"📦 数据库结构更新: 添加了 {len(result['columns_added'])} 个字段")
+                logger.info(f"[UPDATE] 数据库结构更新: 添加了 {len(result['columns_added'])} 个字段")
                 for col in result["columns_added"]:
-                    logger.info(f"   ✅ {col}")
+                    logger.info(f"   [+] {col}")
             
             # 报告基础数据修复
             formula_result = result.get("deduction_formulas", {})
             if formula_result.get("action") in ["rebuilt", "updated"]:
-                logger.info(f"🔧 基础数据修复: 扣重公式已更新")
+                logger.info(f"[FIX] 基础数据修复: 扣重公式已更新")
                 for detail in formula_result.get("details", []):
-                    logger.info(f"   ✅ {detail}")
+                    logger.info(f"   [+] {detail}")
             
             # 版本更新
             if result.get("old_version") != result.get("new_version"):
-                logger.info(f"📊 数据库版本: {result.get('old_version') or '初始'} → {result.get('new_version')}")
+                logger.info(f"[DB] 数据库版本: {result.get('old_version') or '初始'} -> {result.get('new_version')}")
                 
     except Exception as e:
         logger.warning(f"数据库迁移跳过: {e}")
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     init_scheduler()
     yield
     # 关闭时
-    logger.info("🛑 应用关闭中...")
+    logger.info("[STOPPING] 应用关闭中...")
     shutdown_scheduler()
 
 app = FastAPI(
