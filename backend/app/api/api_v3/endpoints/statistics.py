@@ -953,7 +953,7 @@ async def get_entity_trading(
             "quantity": sales_quantity,
             "amount": sales_amount,
             "profit": sales_profit,
-            "profit_rate": round(sales_profit / sales_amount * 100, 2) if sales_amount > 0 else 0,
+            "profit_rate": max(-999, min(999, round(sales_profit / sales_product_amount * 100, 2))) if sales_product_amount > 0 else 0,
             "products": sales_products
         },
         "purchase": {
@@ -1117,10 +1117,35 @@ async def get_product_trading(
         )
         cost_amt = Decimal(str(cost_result.scalar() or 0))
         
-        # 计算该商品对应的运费和冷藏费（按销售金额比例分摊）
-        # 简化处理：商品级别的利润 = 销售金额 - 批次成本
-        # 运费和冷藏费在整体利润中扣除
-        profit = sale_amt - cost_amt
+        # 获取该商品对应订单的运费和冷藏费（按商品金额比例分摊）
+        fees_result = await db.execute(
+            select(
+                func.coalesce(func.sum(BusinessOrder.total_shipping), 0),
+                func.coalesce(func.sum(BusinessOrder.total_storage_fee), 0),
+                func.coalesce(func.sum(BusinessOrder.total_amount), 0)  # 订单总商品金额
+            )
+            .join(OrderItem, OrderItem.order_id == BusinessOrder.id)
+            .where(and_(
+                BusinessOrder.order_type == "sale",
+                BusinessOrder.status == "completed",
+                OrderItem.product_id == product.id,
+                *date_conditions
+            ))
+        )
+        fees_row = fees_result.first()
+        total_shipping = Decimal(str(fees_row[0])) if fees_row else Decimal("0")
+        total_storage_fee = Decimal(str(fees_row[1])) if fees_row else Decimal("0")
+        order_total_amount = Decimal(str(fees_row[2])) if fees_row else Decimal("0")
+        
+        # 按商品金额占订单总金额的比例分摊运费和冷藏费
+        if order_total_amount > 0 and sale_amt > 0:
+            fee_ratio = sale_amt / order_total_amount
+            allocated_fees = (total_shipping + total_storage_fee) * fee_ratio
+        else:
+            allocated_fees = Decimal("0")
+        
+        # 利润 = 销售金额 - 批次成本 - 分摊的运费和冷藏费
+        profit = sale_amt - cost_amt - allocated_fees
         
         # 库存
         stock_result = await db.execute(
@@ -1142,7 +1167,7 @@ async def get_product_trading(
                 "sale_qty": sale_qty,
                 "sale_amount": float(sale_amt),
                 "profit": float(profit),
-                "profit_rate": round(float(profit / sale_amt * 100), 2) if sale_amt > 0 else 0,
+                "profit_rate": max(-999, min(999, round(float(profit / sale_amt * 100), 2))) if sale_amt > 0 else 0,
                 "stock_qty": float(stock_qty),
                 "avg_purchase_price": round(float(purchase_amt / purchase_qty), 2) if purchase_qty > 0 else 0,
                 "avg_sale_price": round(float(sale_amt / sale_qty), 2) if sale_qty > 0 else 0,
@@ -1164,7 +1189,7 @@ async def get_product_trading(
             "total_sale_qty": total_sale_qty,
             "total_sale_amount": float(total_sale_amt),
             "total_profit": float(total_profit),
-            "total_profit_rate": round(float(total_profit / total_sale_amt * 100), 2) if total_sale_amt > 0 else 0,
+            "total_profit_rate": max(-999, min(999, round(float(total_profit / total_sale_amt * 100), 2))) if total_sale_amt > 0 else 0,
             "total_stock": float(total_stock)
         },
         "date_range": {
