@@ -23,9 +23,13 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.3';
+const APP_VERSION = '1.2.4';
 const BUILD_DATE = '2024-12-08';
 const CHANGELOG = [
+  { version: '1.2.4', date: '2024-12-08', changes: [
+    '修复杂费客商导致的API 500错误',
+    '自动修复数据库中的NULL字段'
+  ]},
   { version: '1.2.3', date: '2024-12-08', changes: [
     '修复Windows下后端启动失败的问题（Unicode编码错误）',
     '优化日志输出兼容性'

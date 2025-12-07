@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.3"
+CURRENT_DB_VERSION = "1.2.4"
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -394,8 +394,8 @@ async def ensure_misc_expense_entity(db: AsyncSession) -> dict:
             # 创建杂费客商
             await db.execute(text("""
                 INSERT INTO v3_entities 
-                (code, name, entity_type, is_active, is_system, created_by, created_at, updated_at)
-                VALUES (:code, :name, :entity_type, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (code, name, entity_type, credit_level, is_active, is_system, created_by, created_at, updated_at)
+                VALUES (:code, :name, :entity_type, 5, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """), SYSTEM_MISC_EXPENSE_ENTITY)
             await db.commit()
             
@@ -413,6 +413,29 @@ async def ensure_misc_expense_entity(db: AsyncSession) -> dict:
         logger.error(f"确保杂费客商失败: {e}")
         result["action"] = "error"
         result["error"] = str(e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+    
+    return result
+
+
+async def fix_null_fields(db: AsyncSession) -> dict:
+    """
+    修复数据库中的 NULL 字段，设置为默认值
+    """
+    result = {"fixed": 0}
+    
+    try:
+        # 修复 v3_entities 中的 credit_level 为 NULL 的记录
+        await db.execute(text(
+            "UPDATE v3_entities SET credit_level = 5 WHERE credit_level IS NULL"
+        ))
+        await db.commit()
+        result["fixed"] += 1
+    except Exception as e:
+        logger.warning(f"修复 NULL 字段时出错: {e}")
         try:
             await db.rollback()
         except Exception:
@@ -455,6 +478,9 @@ async def run_migrations(db: AsyncSession) -> dict:
                 logger.info(f"  - {col}")
         else:
             logger.info("数据库结构完整，无需更新")
+        
+        # ★ 修复 NULL 字段 ★
+        await fix_null_fields(db)
         
         # ★ 检查并修复基础数据 ★
         formula_result = await ensure_deduction_formulas(db)
