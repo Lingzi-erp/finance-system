@@ -23,9 +23,12 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.7';
+const APP_VERSION = '1.2.8';
 const BUILD_DATE = '2024-12-08';
 const CHANGELOG = [
+  { version: '1.2.8', date: '2024-12-08', changes: [
+    '修复打包问题：确保所有代码正确包含在安装包中',
+  ]},
   { version: '1.2.7', date: '2024-12-08', changes: [
     '退货对话框优化：目标实体只显示供应商和仓库',
     '退货对话框增加搜索功能，使用统一的下拉组件样式',
