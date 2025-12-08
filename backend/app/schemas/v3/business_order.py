@@ -220,10 +220,21 @@ class OrderStatusChange(BaseModel):
     return_shipping: Optional[float] = Field(None, ge=0, description="退货总运费（action=return 时可指定）")
 
 
+class ReturnBatchInput(BaseModel):
+    """退货批次分配"""
+    batch_id: int = Field(..., description="批次ID")
+    quantity: float = Field(..., gt=0, description="从该批次退货的数量")
+    storage_fee: float = Field(default=0, ge=0, description="该批次的冷藏费")
+    reason: Optional[str] = Field(None, max_length=200, description="退货原因")
+
+
 class ReturnItemInput(BaseModel):
     order_item_id: int = Field(..., description="原单明细ID")
     quantity: float = Field(..., gt=0, description="退货数量（支持小数）")
     shipping_cost: Optional[float] = Field(None, ge=0, description="退货运费（可选，不填则按比例计算）")
+    storage_fee: Optional[float] = Field(None, ge=0, description="退货冷藏费（可选）")
+    # 批次分配（可选，如果不提供则按FIFO自动分配）
+    batch_allocations: Optional[List[ReturnBatchInput]] = Field(None, description="批次分配（退供应商时指定从哪些批次退）")
 
 
 class RelatedOrderInfo(BaseModel):
@@ -242,4 +253,5 @@ class RelatedOrderInfo(BaseModel):
 BusinessOrderResponse.model_rebuild()
 OrderStatusChange.model_rebuild()
 OrderItemCreate.model_rebuild()
+ReturnItemInput.model_rebuild()
 

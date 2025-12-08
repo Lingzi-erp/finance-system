@@ -61,6 +61,10 @@ class StockAnalysisItem(BaseModel):
     product_id: int
     product_name: str = ""
     product_code: str = ""
+    # 规格信息（v1.2.6+）
+    spec_id: Optional[int] = None
+    spec_name: str = ""
+    # 库存数据
     quantity: int = 0
     reserved_quantity: int = 0
     available_quantity: int = 0
@@ -87,6 +91,10 @@ class StockWarningItem(BaseModel):
     product_id: int
     product_name: str = ""
     product_code: str = ""
+    # 规格信息（v1.2.6+）
+    spec_id: Optional[int] = None
+    spec_name: str = ""
+    # 库存数据
     quantity: int = 0
     safety_stock: int = 0
     shortage: int = 0  # 缺口 = 安全库存 - 当前库存

@@ -27,6 +27,10 @@ class StockBatch(Base):
     # 关联商品
     product_id = Column(Integer, ForeignKey("v3_products.id"), nullable=False, index=True)
     
+    # === 商品规格（从订单明细复制，用于区分同商品不同规格）===
+    spec_id = Column(Integer, ForeignKey("v3_product_specs.id"), comment="商品规格ID")
+    spec_name = Column(String(50), comment="规格名称快照，如：大箱、小箱")
+    
     # 存放位置（哪个冷库/仓库）
     storage_entity_id = Column(Integer, ForeignKey("v3_entities.id"), nullable=False, index=True, comment="存放仓库")
     
@@ -93,6 +97,7 @@ class StockBatch(Base):
 
     # 关系
     product = relationship("Product", foreign_keys=[product_id])
+    spec = relationship("ProductSpec", foreign_keys=[spec_id])
     storage_entity = relationship("Entity", foreign_keys=[storage_entity_id])
     source_entity = relationship("Entity", foreign_keys=[source_entity_id])
     source_order = relationship("BusinessOrder", foreign_keys=[source_order_id])
@@ -223,4 +228,60 @@ class OrderItemBatch(Base):
         """计算成本"""
         if self.cost_price and self.quantity:
             self.cost_amount = self.cost_price * self.quantity
+
+
+class ReturnItemBatch(Base):
+    """
+    退货明细-批次关联
+    
+    记录退货时涉及的批次信息：
+    - 退供应商（return_out）：记录从哪个批次退出
+    - 客户退货（return_in）：记录退回到哪个批次（可能是原批次或新批次）
+    
+    支持复杂场景：
+    1. 一个退货明细可能涉及多个批次（混批退货）
+    2. 一个批次可能被部分退货
+    3. 退货可能产生冷藏费等额外费用
+    """
+    __tablename__ = "v3_return_item_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 关联退货订单明细（BusinessOrder类型为return_in/return_out的订单明细）
+    order_item_id = Column(Integer, ForeignKey("v3_order_items.id"), nullable=False, index=True)
+    
+    # 来源批次（退供应商时：从哪个批次退出；客户退货时：原销售时的批次）
+    source_batch_id = Column(Integer, ForeignKey("v3_stock_batches.id"), index=True, comment="来源批次")
+    
+    # 目标批次（客户退货时：退回到哪个批次；可能是原批次或新建批次）
+    target_batch_id = Column(Integer, ForeignKey("v3_stock_batches.id"), index=True, comment="目标批次")
+    
+    # 退货数量
+    quantity = Column(DECIMAL(12, 2), nullable=False, comment="退货数量")
+    
+    # 退货金额（按原销售/采购价）
+    amount = Column(DECIMAL(12, 2), comment="退货金额")
+    
+    # 冷藏费（退货过程中产生的仓储费用）
+    storage_fee = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="退货冷藏费")
+    
+    # 其他费用（搬运费、损耗费等）
+    other_fee = Column(DECIMAL(12, 2), default=Decimal("0.00"), comment="其他费用")
+    other_fee_notes = Column(String(200), comment="其他费用说明")
+    
+    # 退货原因
+    reason = Column(String(200), comment="退货原因")
+    
+    # 审计字段
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("sys_user.id"))
+
+    # 关系
+    order_item = relationship("OrderItem", backref="return_batch_records")
+    source_batch = relationship("StockBatch", foreign_keys=[source_batch_id])
+    target_batch = relationship("StockBatch", foreign_keys=[target_batch_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+    def __repr__(self):
+        return f"<ReturnItemBatch item:{self.order_item_id} src:{self.source_batch_id} tgt:{self.target_batch_id} qty:{self.quantity}>"
 

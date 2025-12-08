@@ -103,6 +103,17 @@ async def get_dashboard(
     today_sales = float(today_sales_row[0]) if today_sales_row else 0
     today_sales_count = int(today_sales_row[1]) if today_sales_row else 0
     
+    # 今日客户退货（return_in，需从销售中扣减）
+    today_return_in_result = await db.execute(
+        select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
+            BusinessOrder.order_type == "return_in",
+            BusinessOrder.status == "completed",
+            BusinessOrder.unloading_date >= today_start
+        )
+    )
+    today_return_in = float(today_return_in_result.scalar() or 0)
+    today_sales = today_sales - today_return_in  # 净销售额
+    
     # 今日采购（采购单按装货日期筛选）
     today_purchase_result = await db.execute(
         select(
@@ -117,6 +128,17 @@ async def get_dashboard(
     today_purchase_row = today_purchase_result.first()
     today_purchase = float(today_purchase_row[0]) if today_purchase_row else 0
     today_purchase_count = int(today_purchase_row[1]) if today_purchase_row else 0
+    
+    # 今日退供应商（return_out，需从采购中扣减）
+    today_return_out_result = await db.execute(
+        select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
+            BusinessOrder.order_type == "return_out",
+            BusinessOrder.status == "completed",
+            BusinessOrder.loading_date >= today_start
+        )
+    )
+    today_return_out = float(today_return_out_result.scalar() or 0)
+    today_purchase = today_purchase - today_return_out  # 净采购额
     
     # 今日收款
     today_received_result = await db.execute(
@@ -151,6 +173,17 @@ async def get_dashboard(
     month_sales = float(month_sales_row[0]) if month_sales_row else 0
     month_sales_count = int(month_sales_row[1]) if month_sales_row else 0
     
+    # 本月客户退货（return_in，需从销售中扣减）
+    month_return_in_result = await db.execute(
+        select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
+            BusinessOrder.order_type == "return_in",
+            BusinessOrder.status == "completed",
+            BusinessOrder.unloading_date >= month_start
+        )
+    )
+    month_return_in = float(month_return_in_result.scalar() or 0)
+    month_sales = month_sales - month_return_in  # 净销售额
+    
     # 本月采购（采购单按装货日期筛选）
     month_purchase_result = await db.execute(
         select(
@@ -165,6 +198,17 @@ async def get_dashboard(
     month_purchase_row = month_purchase_result.first()
     month_purchase = float(month_purchase_row[0]) if month_purchase_row else 0
     month_purchase_count = int(month_purchase_row[1]) if month_purchase_row else 0
+    
+    # 本月退供应商（return_out，需从采购中扣减）
+    month_return_out_result = await db.execute(
+        select(func.coalesce(func.sum(BusinessOrder.final_amount), 0)).where(
+            BusinessOrder.order_type == "return_out",
+            BusinessOrder.status == "completed",
+            BusinessOrder.loading_date >= month_start
+        )
+    )
+    month_return_out = float(month_return_out_result.scalar() or 0)
+    month_purchase = month_purchase - month_return_out  # 净采购额
     
     # 本月利润（完全从单据和批次追溯计算）
     # 利润 = 销售金额 - 批次成本 - 销售运费 - 销售冷藏费 - 销售其他费用
@@ -645,6 +689,10 @@ async def get_stock_analysis(
             product_id=stock.product_id,
             product_name=stock.product.name if stock.product else "",
             product_code=stock.product.code if stock.product else "",
+            # 规格信息
+            spec_id=stock.spec_id,
+            spec_name=stock.spec_name or "",
+            # 库存数据
             quantity=stock.quantity,
             reserved_quantity=stock.reserved_quantity,
             available_quantity=stock.available_quantity,
@@ -698,6 +746,10 @@ async def get_stock_warning(
             product_id=stock.product_id,
             product_name=stock.product.name if stock.product else "",
             product_code=stock.product.code if stock.product else "",
+            # 规格信息
+            spec_id=stock.spec_id,
+            spec_name=stock.spec_name or "",
+            # 库存数据
             quantity=stock.quantity,
             safety_stock=stock.safety_stock,
             shortage=stock.safety_stock - stock.quantity,
@@ -827,6 +879,28 @@ async def get_entity_trading(
     sales_storage_fee = float(sales_row[5]) if sales_row else 0
     sales_other_fee = float(sales_row[6]) if sales_row else 0
     
+    # 客户退货统计（return_in，需从销售中扣减）
+    return_in_conditions = [
+        BusinessOrder.order_type == "return_in",
+        BusinessOrder.status == "completed",
+        BusinessOrder.target_id == entity_id,  # 退货目标是该客户（实际是退回仓库）
+        *sales_date_conditions
+    ]
+    return_in_result = await db.execute(
+        select(
+            func.coalesce(func.sum(BusinessOrder.total_quantity), 0),
+            func.coalesce(func.sum(BusinessOrder.final_amount), 0)
+        ).where(and_(*return_in_conditions))
+    )
+    return_in_row = return_in_result.first()
+    return_in_quantity = float(return_in_row[0]) if return_in_row else 0
+    return_in_amount = float(return_in_row[1]) if return_in_row else 0
+    
+    # 调整销售统计（扣减退货）
+    sales_quantity = sales_quantity - return_in_quantity
+    sales_amount = sales_amount - return_in_amount
+    sales_product_amount = sales_product_amount - return_in_amount  # 简化处理
+    
     # 销售利润（从批次追溯计算）
     # 利润 = 商品销售金额 - 批次成本 - 销售运费 - 销售冷藏费 - 其他费用
     sales_cost_result = await db.execute(
@@ -864,6 +938,27 @@ async def get_entity_trading(
     purchase_order_count = purchase_row[0] if purchase_row else 0
     purchase_quantity = float(purchase_row[1]) if purchase_row else 0
     purchase_amount = float(purchase_row[2]) if purchase_row else 0
+    
+    # 退供应商统计（return_out，需从采购中扣减）
+    return_out_conditions = [
+        BusinessOrder.order_type == "return_out",
+        BusinessOrder.status == "completed",
+        BusinessOrder.target_id == entity_id,  # 退货目标是该供应商
+        *purchase_date_conditions
+    ]
+    return_out_result = await db.execute(
+        select(
+            func.coalesce(func.sum(BusinessOrder.total_quantity), 0),
+            func.coalesce(func.sum(BusinessOrder.final_amount), 0)
+        ).where(and_(*return_out_conditions))
+    )
+    return_out_row = return_out_result.first()
+    return_out_quantity = float(return_out_row[0]) if return_out_row else 0
+    return_out_amount = float(return_out_row[1]) if return_out_row else 0
+    
+    # 调整采购统计（扣减退货）
+    purchase_quantity = purchase_quantity - return_out_quantity
+    purchase_amount = purchase_amount - return_out_amount
     
     # 销售商品明细（按商品+包装规格分组）
     # 先获取商品信息和销售金额

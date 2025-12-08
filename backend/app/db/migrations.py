@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.4"
+CURRENT_DB_VERSION = "1.2.7"
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -158,6 +158,8 @@ REQUIRED_COLUMNS = [
     ("v3_order_items", "invoice_no", "VARCHAR(50)", None),
     ("v3_order_items", "shipping_type", "VARCHAR(20)", None),
     ("v3_order_items", "shipping_rate", "DECIMAL(12,4)", None),
+    # 批次分配（退货时使用）
+    ("v3_order_items", "batch_allocations_json", "TEXT", None),
     
     # ========== v3_business_orders ==========
     ("v3_business_orders", "total_shipping", "DECIMAL(12,2)", "0"),
@@ -173,6 +175,14 @@ REQUIRED_COLUMNS = [
     ("v3_stock_batches", "is_initial", "BOOLEAN", "0"),
     ("v3_stock_batches", "current_gross_weight", "DECIMAL(12,2)", None),
     ("v3_stock_batches", "deduction_formula_id", "INTEGER", None),
+    # 规格相关（v1.2.6+）
+    ("v3_stock_batches", "spec_id", "INTEGER", None),
+    ("v3_stock_batches", "spec_name", "VARCHAR(50)", None),
+    
+    # ========== v3_stocks ==========
+    # 规格相关（v1.2.6+）
+    ("v3_stocks", "spec_id", "INTEGER", None),
+    ("v3_stocks", "spec_name", "VARCHAR(50)", None),
     
     # ========== v3_account_balances ==========
     ("v3_account_balances", "is_initial", "BOOLEAN", "0"),
@@ -243,6 +253,7 @@ SYSTEM_MISC_EXPENSE_ENTITY = {
     "name": "杂费支出",
     "entity_type": "other",
     "is_system": True,  # 标记为系统客商，不可删除
+    "credit_level": 5,  # 必须设置，否则为NULL会导致Pydantic验证失败
 }
 
 

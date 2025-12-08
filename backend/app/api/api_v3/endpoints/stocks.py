@@ -72,6 +72,10 @@ def build_stock_response(stock: Stock) -> StockResponse:
         product_specification=(stock.product.specification or "") if stock.product else "",
         product_category=(stock.product.category or "") if stock.product else "",
         product_unit=stock.product.unit if stock.product else "",
+        # 规格信息
+        spec_id=stock.spec_id,
+        spec_name=stock.spec_name or "",
+        # 复式单位
         composite_unit_id=composite_unit_id,
         composite_unit_name=composite_unit_name,
         container_name=container_name,
@@ -643,14 +647,31 @@ async def revert_stock_flow(
 async def get_or_create_stock(
     db: AsyncSession,
     warehouse_id: int,
-    product_id: int) -> Stock:
-    """获取或创建库存记录"""
+    product_id: int,
+    spec_id: int = None,
+    spec_name: str = None) -> Stock:
+    """获取或创建库存记录
+    
+    Args:
+        warehouse_id: 仓库ID
+        product_id: 商品ID
+        spec_id: 规格ID（可选，None表示不区分规格）
+        spec_name: 规格名称快照（可选）
+    """
+    # 构建查询条件
+    conditions = [
+        Stock.warehouse_id == warehouse_id,
+        Stock.product_id == product_id
+    ]
+    
+    # 如果指定了规格，按规格查找；否则查找不区分规格的记录
+    if spec_id is not None:
+        conditions.append(Stock.spec_id == spec_id)
+    else:
+        conditions.append(Stock.spec_id.is_(None))
+    
     result = await db.execute(
-        select(Stock).where(
-            and_(
-                Stock.warehouse_id == warehouse_id,
-                Stock.product_id == product_id)
-        )
+        select(Stock).where(and_(*conditions))
     )
     stock = result.scalar_one_or_none()
     
@@ -658,6 +679,8 @@ async def get_or_create_stock(
         stock = Stock(
             warehouse_id=warehouse_id,
             product_id=product_id,
+            spec_id=spec_id,
+            spec_name=spec_name,
             quantity=0,
             reserved_quantity=0)
         db.add(stock)
@@ -673,9 +696,16 @@ async def add_stock(
     operator_id: int,
     order_id: int = None,
     order_item_id: int = None,
-    reason: str = None) -> Stock:
-    """入库"""
-    stock = await get_or_create_stock(db, warehouse_id, product_id)
+    reason: str = None,
+    spec_id: int = None,
+    spec_name: str = None) -> Stock:
+    """入库
+    
+    Args:
+        spec_id: 规格ID（可选，None表示不区分规格）
+        spec_name: 规格名称快照（可选）
+    """
+    stock = await get_or_create_stock(db, warehouse_id, product_id, spec_id, spec_name)
     
     old_quantity = stock.quantity
     stock.quantity += quantity
@@ -705,9 +735,16 @@ async def reduce_stock(
     order_id: int = None,
     order_item_id: int = None,
     reason: str = None,
-    check_available: bool = True) -> Stock:
-    """出库"""
-    stock = await get_or_create_stock(db, warehouse_id, product_id)
+    check_available: bool = True,
+    spec_id: int = None,
+    spec_name: str = None) -> Stock:
+    """出库
+    
+    Args:
+        spec_id: 规格ID（可选，None表示不区分规格）
+        spec_name: 规格名称快照（可选）
+    """
+    stock = await get_or_create_stock(db, warehouse_id, product_id, spec_id, spec_name)
     
     if check_available and stock.available_quantity < quantity:
         raise HTTPException(
@@ -747,9 +784,16 @@ async def reserve_stock(
     operator_id: int,
     order_id: int = None,
     order_item_id: int = None,
-    reason: str = None) -> Stock:
-    """预留库存（确认出库单时调用）"""
-    stock = await get_or_create_stock(db, warehouse_id, product_id)
+    reason: str = None,
+    spec_id: int = None,
+    spec_name: str = None) -> Stock:
+    """预留库存（确认出库单时调用）
+    
+    Args:
+        spec_id: 规格ID（可选，None表示不区分规格）
+        spec_name: 规格名称快照（可选）
+    """
+    stock = await get_or_create_stock(db, warehouse_id, product_id, spec_id, spec_name)
     
     if stock.available_quantity < quantity:
         raise HTTPException(
@@ -783,9 +827,16 @@ async def release_stock(
     operator_id: int,
     order_id: int = None,
     order_item_id: int = None,
-    reason: str = None) -> Stock:
-    """释放预留库存（取消出库单时调用）"""
-    stock = await get_or_create_stock(db, warehouse_id, product_id)
+    reason: str = None,
+    spec_id: int = None,
+    spec_name: str = None) -> Stock:
+    """释放预留库存（取消出库单时调用）
+    
+    Args:
+        spec_id: 规格ID（可选，None表示不区分规格）
+        spec_name: 规格名称快照（可选）
+    """
+    stock = await get_or_create_stock(db, warehouse_id, product_id, spec_id, spec_name)
     
     release = min(stock.reserved_quantity, quantity)
     stock.reserved_quantity -= release

@@ -48,7 +48,13 @@ class StockResponse(StockBase):
     product_category: str = ""  # 商品分类
     product_unit: str = ""
     
+    # 规格信息（v1.2.6+，支持同商品不同规格分开记库存）
+    spec_id: Optional[int] = None
+    spec_name: str = ""
+    
     # 包装换算信息（从商品规格获取，用于显示重量换算）
+    composite_unit_id: Optional[int] = None
+    composite_unit_name: Optional[str] = None
     container_name: Optional[str] = None  # 容器名称：件、箱
     unit_quantity: Optional[float] = None  # 每件数量：15
     base_unit_symbol: Optional[str] = None  # 基础单位：kg

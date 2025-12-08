@@ -51,6 +51,10 @@ def build_batch_response(batch: StockBatch) -> StockBatchResponse:
         source_order_id=batch.source_order_id,
         deduction_formula_id=batch.deduction_formula_id,
         
+        # 规格信息
+        spec_id=batch.spec_id,
+        spec_name=batch.spec_name or "",
+        
         # 毛重/净重
         gross_weight=batch.gross_weight,
         tare_weight=batch.tare_weight or Decimal("0"),
@@ -121,14 +125,19 @@ async def list_batches(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     product_id: Optional[int] = Query(None, description="商品ID"),
+    spec_id: Optional[int] = Query(None, description="商品规格ID（同商品不同规格视为不同商品）"),
     storage_entity_id: Optional[int] = Query(None, description="存放仓库ID"),
     source_entity_id: Optional[int] = Query(None, description="来源供应商ID"),
     status: Optional[str] = Query(None, description="状态：active/depleted"),
     include_depleted: bool = Query(False, description="是否包含已清空的批次"),
     search: Optional[str] = Query(None, description="搜索批次号/商品名")) -> Any:
-    """获取批次列表"""
+    """获取批次列表
+    
+    注意：同商品不同规格视为不同商品，可以通过 spec_id 筛选特定规格的批次
+    """
     query = select(StockBatch).options(
         selectinload(StockBatch.product),
+        selectinload(StockBatch.spec),
         selectinload(StockBatch.storage_entity),
         selectinload(StockBatch.source_entity),
         selectinload(StockBatch.source_order),
@@ -137,14 +146,19 @@ async def list_batches(
     
     conditions = []
     
-    # 默认不显示已清空的批次
+    # 默认不显示已清空的批次（排除 depleted 状态，而非只选 active）
     if not include_depleted:
-        conditions.append(StockBatch.status == "active")
-    elif status:
+        conditions.append(StockBatch.status != "depleted")
+    
+    # 如果指定了状态筛选
+    if status:
         conditions.append(StockBatch.status == status)
     
     if product_id:
         conditions.append(StockBatch.product_id == product_id)
+    # 规格筛选：同商品不同规格视为不同商品
+    if spec_id is not None:
+        conditions.append(StockBatch.spec_id == spec_id)
     if storage_entity_id:
         conditions.append(StockBatch.storage_entity_id == storage_entity_id)
     if source_entity_id:
@@ -186,21 +200,33 @@ async def list_available_batches(
     *,
     db: AsyncSession = Depends(get_db),
     product_id: int = Query(..., description="商品ID"),
+    spec_id: Optional[int] = Query(None, description="商品规格ID（同商品不同规格视为不同商品）"),
     storage_entity_id: Optional[int] = Query(None, description="存放仓库ID（可选）")) -> Any:
-    """获取可用批次列表（用于销售时选择）"""
-    query = select(StockBatch).options(
-        selectinload(StockBatch.product),
-        selectinload(StockBatch.storage_entity)).where(
-        and_(
-            StockBatch.product_id == product_id,
-            StockBatch.status == "active",
-            StockBatch.current_quantity > StockBatch.reserved_quantity)
-    )
+    """获取可用批次列表（用于销售时选择）
+    
+    注意：同商品不同规格视为不同商品
+    - 如果传入 spec_id，则只返回该规格的批次
+    - 如果不传 spec_id，则返回该商品所有规格的批次（前端需按规格分组显示）
+    """
+    conditions = [
+        StockBatch.product_id == product_id,
+        StockBatch.status == "active",
+        StockBatch.current_quantity > StockBatch.reserved_quantity
+    ]
+    
+    # 规格筛选：同商品不同规格视为不同商品
+    if spec_id is not None:
+        conditions.append(StockBatch.spec_id == spec_id)
     
     if storage_entity_id:
-        query = query.where(StockBatch.storage_entity_id == storage_entity_id)
+        conditions.append(StockBatch.storage_entity_id == storage_entity_id)
     
-    query = query.order_by(StockBatch.received_at.asc())  # 先进先出
+    query = select(StockBatch).options(
+        selectinload(StockBatch.product),
+        selectinload(StockBatch.spec),
+        selectinload(StockBatch.storage_entity)).where(
+        and_(*conditions)
+    ).order_by(StockBatch.received_at.asc())  # 先进先出
     
     result = await db.execute(query)
     batches = result.scalars().all()
@@ -212,6 +238,10 @@ async def list_available_batches(
             product_id=b.product_id,
             product_name=b.product.name if b.product else "",
             storage_entity_name=b.storage_entity.name if b.storage_entity else "",
+            # 规格信息
+            spec_id=b.spec_id,
+            spec_name=b.spec_name or (b.spec.name if b.spec else ""),
+            # 重量
             gross_weight=b.gross_weight,
             current_quantity=b.current_quantity,
             available_quantity=b.available_quantity,
@@ -296,6 +326,9 @@ async def create_batch(
         source_entity_id=batch_in.source_entity_id,
         source_order_id=batch_in.source_order_id,
         deduction_formula_id=batch_in.deduction_formula_id,
+        # === 规格信息 ===
+        spec_id=batch_in.spec_id if hasattr(batch_in, 'spec_id') else None,
+        spec_name=batch_in.spec_name if hasattr(batch_in, 'spec_name') else None,
         # 毛重/净重
         gross_weight=batch_in.gross_weight,
         tare_weight=tare_weight,
@@ -441,6 +474,10 @@ async def import_initial_batches(
                 batch_no=batch_no,
                 product_id=item.product_id,
                 storage_entity_id=item.storage_entity_id,
+                # === 规格信息 ===
+                spec_id=item.spec_id if hasattr(item, 'spec_id') else None,
+                spec_name=item.spec_name if hasattr(item, 'spec_name') else None,
+                # 重量
                 gross_weight=item.gross_weight,
                 tare_weight=item.tare_weight,
                 initial_quantity=item.quantity,
@@ -694,6 +731,9 @@ async def create_batch_from_purchase(
         source_entity_id=order.source_id,   # 来源供应商/冷库
         source_order_id=order.id,
         deduction_formula_id=item.deduction_formula_id,  # 记录使用的扣重公式
+        # === 规格信息（从订单明细复制）===
+        spec_id=item.spec_id,
+        spec_name=item.spec_name,
         # 毛重/净重
         gross_weight=gross_weight,
         tare_weight=tare_weight or Decimal("0"),
@@ -837,6 +877,10 @@ async def sync_batches_from_orders(
                 source_entity_id=order.source_id,
                 source_order_id=order.id,
                 deduction_formula_id=item.deduction_formula_id,
+                # === 规格信息 ===
+                spec_id=item.spec_id,
+                spec_name=item.spec_name,
+                # 重量
                 gross_weight=gross_weight,
                 tare_weight=tare_weight,
                 initial_quantity=net_weight,

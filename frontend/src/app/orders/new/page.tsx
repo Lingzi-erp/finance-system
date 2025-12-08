@@ -278,12 +278,14 @@ export default function NewOrderPage() {
     }]); 
   }
   
-  // 加载产品的可用批次
-  const loadProductBatches = async (productId: number, warehouseId: number) => {
-    if (productBatches[productId]) return; // 已加载过
+  // 加载产品的可用批次（按规格筛选）
+  const loadProductBatches = async (productId: number, warehouseId: number, specId?: number) => {
+    // 使用 productId + specId 作为缓存键，因为同商品不同规格视为不同商品
+    const cacheKey = specId ? `${productId}_${specId}` : productId.toString();
+    if (productBatches[cacheKey]) return; // 已加载过
     try {
-      const res = await batchesApi.listByProduct(productId, warehouseId);
-      setProductBatches(prev => ({ ...prev, [productId]: res.data }));
+      const res = await batchesApi.listByProduct(productId, warehouseId, specId);
+      setProductBatches(prev => ({ ...prev, [cacheKey]: res.data }));
     } catch (err) {
       console.error('Failed to load batches:', err);
     }
@@ -397,6 +399,12 @@ export default function NewOrderPage() {
         newItems[index].unit_price = 0;
         newItems[index].gross_weight = undefined;
         newItems[index].deduction_formula_id = undefined;
+        
+        // 销售时：规格变化，重新加载该规格的批次（同商品不同规格视为不同商品）
+        if (orderType === 'sale' && sourceId > 0 && item.product_id) {
+          newItems[index].batch_allocations = [];  // 清空批次选择
+          loadProductBatches(item.product_id, sourceId, value);
+        }
       }
     }
     setItems(newItems);
@@ -763,13 +771,24 @@ export default function NewOrderPage() {
                   </div>
                   
                   {/* 销售单：批次选择（必选）- 独立行，占满宽度 */}
-                  {orderType === 'sale' && item.product_id > 0 && productBatches[item.product_id] && productBatches[item.product_id].length > 0 && (
+                  {/* 同商品不同规格视为不同商品，批次需要按规格匹配 */}
+                  {(() => {
+                    // 计算批次缓存键
+                    const batchCacheKey = item.spec_id ? `${item.product_id}_${item.spec_id}` : item.product_id.toString();
+                    const itemBatches = productBatches[batchCacheKey] || [];
+                    
+                    if (orderType !== 'sale' || item.product_id <= 0 || itemBatches.length === 0) return null;
+                    
+                    return (
                     <div className="mt-3">
-                      <label className="text-xs font-medium text-slate-600 block mb-1">📦 选择出货批次 *</label>
+                      <label className="text-xs font-medium text-slate-600 block mb-1">
+                        📦 选择出货批次 *
+                        {item.spec_name && <span className="ml-1 text-purple-600">({item.spec_name})</span>}
+                      </label>
                       <Select 
                         value={item.batch_allocations?.[0]?.batch_id?.toString() || ''} 
                         onValueChange={v => {
-                          const batch = productBatches[item.product_id]?.find(b => b.id === parseInt(v));
+                          const batch = itemBatches.find(b => b.id === parseInt(v));
                           if (batch) {
                             updateItem(index, 'batch_allocations', [{
                               batch_id: batch.id,
@@ -786,9 +805,11 @@ export default function NewOrderPage() {
                           <SelectValue placeholder="请选择批次（先进先出）" />
                         </SelectTrigger>
                         <SelectContent className="w-[var(--radix-select-trigger-width)]">
-                          {productBatches[item.product_id].map((batch, idx) => (
+                          {itemBatches.map((batch, idx) => (
                             <SelectItem key={batch.id} value={batch.id.toString()}>
-                              {idx === 0 ? '🔸 ' : ''}{batch.batch_no} | {batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'} | 库存:{Number(batch.available_quantity).toLocaleString()}{item.product_unit} | ¥{Number(batch.cost_price).toFixed(2)}
+                              {idx === 0 ? '🔸 ' : ''}{batch.batch_no} 
+                              {batch.spec_name && <span className="text-purple-500 ml-1">[{batch.spec_name}]</span>}
+                              {' | '}{batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'} | 库存:{Number(batch.available_quantity).toLocaleString()}{item.product_unit} | ¥{Number(batch.cost_price).toFixed(2)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -821,13 +842,19 @@ export default function NewOrderPage() {
                         <div className="text-xs text-amber-600 mt-2">⚠️ 请选择批次以计算准确的冷藏费</div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                   {/* 批次加载中或无批次 */}
-                  {orderType === 'sale' && item.product_id > 0 && productBatches[item.product_id] && productBatches[item.product_id].length === 0 && (
-                    <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200 text-sm text-amber-700">
-                      ⚠️ 该商品暂无可用库存批次
-                    </div>
-                  )}
+                  {(() => {
+                    const batchCacheKey = item.spec_id ? `${item.product_id}_${item.spec_id}` : item.product_id.toString();
+                    const itemBatches = productBatches[batchCacheKey];
+                    if (orderType !== 'sale' || item.product_id <= 0 || !itemBatches || itemBatches.length > 0) return null;
+                    return (
+                      <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200 text-sm text-amber-700">
+                        ⚠️ 该商品{item.spec_name ? `【${item.spec_name}】规格` : ''}暂无可用库存批次
+                      </div>
+                    );
+                  })()}
                   
                   {/* 毛重扣重区域：散装规格 或 无规格的重量商品（采购/销售通用） */}
                   {['purchase', 'sale'].includes(orderType) && item.product_id > 0 && (

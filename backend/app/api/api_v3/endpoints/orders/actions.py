@@ -114,7 +114,18 @@ async def _prepare_return_items(
                 shipping_rate=float(original.shipping_rate) if original.shipping_rate is not None else None,
                 discount=float(_scale_value(original.discount, t.quantity, original.quantity)),
                 notes=f"退货自 {order.order_no}",
-                original_item_id=original.id)
+                original_item_id=original.id,
+                # === 复制规格信息（同商品不同规格视为不同商品）===
+                spec_id=original.spec_id,
+                spec_name=original.spec_name,
+                # === 复制包装换算信息 ===
+                container_name=original.container_name,
+                unit_quantity=original.unit_quantity,
+                base_unit_symbol=original.base_unit_symbol,
+                pricing_mode=original.pricing_mode,
+                container_count=float(Decimal(str(t.quantity)) / Decimal(str(original.unit_quantity))) if original.unit_quantity and original.unit_quantity > 0 else None,
+                # === 批次分配（如果前端指定了批次）===
+                batch_allocations=t.batch_allocations)
         )
         returned_map[original.id] = returned_map.get(original.id, 0) + t.quantity
     

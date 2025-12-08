@@ -251,7 +251,7 @@ async def init_demo_data(
             total_storage_fee=Decimal("1.5"),  # 0.1吨 × 15元/吨 = 1.5元
             final_amount=Decimal("2601.5"),
             calculate_storage_fee=True,
-            notes="演示采购单",
+            notes="[演示数据] 演示采购单 - 可安全删除",
             created_by=admin_id
         )
         db.add(po1)
@@ -288,8 +288,12 @@ async def init_demo_data(
         db.add(stock1)
         await db.flush()
         
+        # 使用动态生成的批次号（避免与用户数据冲突）
+        from app.api.api_v3.endpoints.batches import generate_batch_no
+        demo_batch_no = await generate_batch_no(db)
+        
         batch1 = StockBatch(
-            batch_no=f"PH{today.strftime('%Y%m%d')}-001",
+            batch_no=demo_batch_no,
             product_id=p1.id,
             storage_entity_id=wh1.id,
             source_entity_id=sp1.id,
@@ -300,6 +304,7 @@ async def init_demo_data(
             cost_amount=Decimal("2500"),
             received_at=today - timedelta(days=3),
             status="active",
+            notes="[演示数据] 演示批次 - 可安全删除",  # 明确标识
             created_by=admin_id
         )
         db.add(batch1)
@@ -331,7 +336,7 @@ async def init_demo_data(
             total_storage_fee=Decimal("0.54"),
             final_amount=Decimal("1100.54"),
             calculate_storage_fee=True,
-            notes="演示销售单",
+            notes="[演示数据] 演示销售单 - 可安全删除",
             created_by=admin_id
         )
         db.add(so1)

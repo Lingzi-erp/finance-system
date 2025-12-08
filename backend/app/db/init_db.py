@@ -7,9 +7,11 @@ from app.db.base import Base
 
 # 导入所有 V3 模型，确保表能被创建
 from app.models.v3 import (
-    Entity, Category, Specification, UnitGroup, Unit,
-    Product, BusinessOrder, OrderItem, OrderFlow, Stock, StockFlow,
-    AccountBalance, PaymentRecord, AuditLog, StockBatch
+    Entity, Category, Specification, UnitGroup, Unit, CompositeUnit,
+    Product, ProductSpec, BusinessOrder, OrderItem, OrderFlow, Role,
+    Stock, StockFlow, StockBatch, OrderItemBatch, ReturnItemBatch,
+    DeductionFormula, AccountBalance, PaymentMethod, PaymentRecord, 
+    AuditLog, Vehicle
 )
 
 

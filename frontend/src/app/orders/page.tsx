@@ -125,6 +125,8 @@ export default function OrdersPage() {
                   <SelectItem value="all">全部类型</SelectItem>
                   <SelectItem value="purchase">采购</SelectItem>
                   <SelectItem value="sale">销售</SelectItem>
+                  <SelectItem value="return_in">客户退货</SelectItem>
+                  <SelectItem value="return_out">退供应商</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -203,11 +205,18 @@ export default function OrdersPage() {
                       </span>
                     </td>
                     <td className="text-slate-500">
-                      {/* 采购单显示装货日期，销售单显示卸货日期 */}
-                      {order.order_type === 'purchase' 
-                        ? (order.loading_date ? new Date(order.loading_date).toLocaleDateString('zh-CN') : '-')
-                        : (order.unloading_date ? new Date(order.unloading_date).toLocaleDateString('zh-CN') : '-')
-                      }
+                      {/* 采购/退供应商显示装货日期，销售/客户退货显示卸货日期，都没有就用订单日期 */}
+                      {(() => {
+                        if (order.order_type === 'purchase' || order.order_type === 'return_out') {
+                          return order.loading_date 
+                            ? new Date(order.loading_date).toLocaleDateString('zh-CN') 
+                            : (order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '-');
+                        } else {
+                          return order.unloading_date 
+                            ? new Date(order.unloading_date).toLocaleDateString('zh-CN') 
+                            : (order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '-');
+                        }
+                      })()}
                     </td>
                     <td>
                       <div className="flex justify-center gap-1">

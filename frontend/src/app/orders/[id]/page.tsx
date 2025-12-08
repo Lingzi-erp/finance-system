@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowRight, CheckCircle2, FileText, Loader2, Package2, Pencil, RefreshCcw, Truck, UserCircle2, Warehouse, Store, DollarSign, ArrowRightLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BusinessOrder, ORDER_STATUS_MAP, ORDER_TYPE_MAP, ordersApi, entitiesApi, Entity } from '@/lib/api/v3';
 
 import { Trash2 } from 'lucide-react';
@@ -31,9 +32,11 @@ export default function OrderDetailPage() {
   const [returnDate, setReturnDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [returnNotes, setReturnNotes] = useState('');
   const [returnShipping, setReturnShipping] = useState<string>('');
+  const [returnStorageFee, setReturnStorageFee] = useState<string>('');  // 退货冷藏费
   const [entities, setEntities] = useState<Entity[]>([]);
   const [loadingEntities, setLoadingEntities] = useState(false);
   const [returnSelections, setReturnSelections] = useState<Record<number, number>>({});
+  const [entitySearch, setEntitySearch] = useState('');  // 实体搜索
   const orderId = useMemo(() => Number(Array.isArray(params.id) ? params.id[0] : params.id), [params.id]);
 
   useEffect(() => { loadOrder(); }, [orderId]);
@@ -105,17 +108,21 @@ export default function OrderDetailPage() {
     }
   };
 
+  // 退货目标只能是供应商或仓库
   const selectableEntities = useMemo(() => {
-    const map = new Map<number, { id: number; name: string; code: string }>();
-    if (order) {
-      map.set(order.source_id, { id: order.source_id, name: order.source_name, code: order.source_code });
-      map.set(order.target_id, { id: order.target_id, name: order.target_name, code: order.target_code });
+    const allowedTypes = ['supplier', 'warehouse', 'supplier_warehouse'];
+    const filtered = entities.filter((e) => allowedTypes.some(t => e.entity_type?.includes(t)));
+    
+    // 搜索过滤
+    if (entitySearch.trim()) {
+      const keyword = entitySearch.toLowerCase().trim();
+      return filtered.filter(e => 
+        e.name.toLowerCase().includes(keyword) || 
+        e.code.toLowerCase().includes(keyword)
+      );
     }
-    entities.forEach((entity) => {
-      map.set(entity.id, { id: entity.id, name: entity.name, code: entity.code });
-    });
-    return Array.from(map.values());
-  }, [entities, order]);
+    return filtered;
+  }, [entities, entitySearch]);
 
   const buildReturnSelections = (current: BusinessOrder) => {
     const defaults: Record<number, number> = {};
@@ -176,13 +183,19 @@ export default function OrderDetailPage() {
         }
       }
       setActionLoading('return');
+      const storageFeeValue = parseFloat(returnStorageFee) || 0;
       const payload = {
         action: 'return',
         description: ACTION_LABELS.return,
         notes: returnNotes || undefined,
         return_target_id: returnTargetId,
         return_date: returnDate ? new Date(returnDate).toISOString() : undefined,
-        return_items: entries.map(([id, qty]) => ({ order_item_id: Number(id), quantity: qty })),
+        return_items: entries.map(([id, qty]) => ({ 
+          order_item_id: Number(id), 
+          quantity: qty,
+          // 将冷藏费按比例分摊到各明细
+          storage_fee: storageFeeValue > 0 ? storageFeeValue * qty / totalReturnQty : undefined,
+        })),
         return_shipping: shippingValue,
       };
       const updated = await ordersApi.action(order.id, payload);
@@ -191,7 +204,9 @@ export default function OrderDetailPage() {
       setShowReturnDialog(false);
       setReturnNotes('');
       setReturnShipping('');
+      setReturnStorageFee('');
       setReturnSelections({});
+      setEntitySearch('');
     } catch (err: any) {
       toast({ title: '退货失败', description: err.message, variant: 'destructive' });
     } finally {
@@ -241,6 +256,7 @@ export default function OrderDetailPage() {
                       <thead className="bg-paper-medium text-ink-medium">
                         <tr>
                           <th className="px-3 py-2 text-left">商品</th>
+                          <th className="px-3 py-2 text-center">批次</th>
                           <th className="px-3 py-2 text-center">原数量</th>
                           <th className="px-3 py-2 text-center">已退</th>
                           <th className="px-3 py-2 text-center">可退</th>
@@ -263,6 +279,15 @@ export default function OrderDetailPage() {
                                   )}
                                 </p>
                                 <p className="text-xs text-ink-medium">{item.product_code} · {item.product_unit}</p>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                {item.batch_no ? (
+                                  <span className="px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded text-xs font-mono">
+                                    {item.batch_no}
+                                  </span>
+                                ) : (
+                                  <span className="text-ink-light text-xs">-</span>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-center">{item.quantity}</td>
                               <td className="px-3 py-2 text-center text-amber-600">{item.returned_quantity ?? 0}</td>
@@ -294,24 +319,38 @@ export default function OrderDetailPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-ink-dark">退回目标实体 *</label>
-                <select
-                  className="w-full border border-ink-light rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  value={returnTargetId ?? ''}
-                  onChange={(e) => setReturnTargetId(e.target.value ? Number(e.target.value) : null)}
+                <p className="text-xs text-ink-medium">仅显示供应商和仓库</p>
+                <input
+                  type="text"
+                  className="w-full border border-ink-light rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="搜索供应商/仓库名称或编码..."
+                  value={entitySearch}
+                  onChange={(e) => setEntitySearch(e.target.value)}
+                />
+                <Select
+                  value={String(returnTargetId ?? selectableEntities[0]?.id ?? '')}
+                  onValueChange={(v) => setReturnTargetId(v ? Number(v) : null)}
                   disabled={loadingEntities}
                 >
-                  <option value="">请选择实体</option>
-                  {selectableEntities.map((entity) => (
-                    <option key={entity.id} value={entity.id}>
-                      {entity.name}（{entity.code}）
-                    </option>
-                  ))}
-                </select>
-                {!loadingEntities && selectableEntities.length === 0 && (
-                  <p className="text-xs text-ink-medium">暂无实体，请先在实体管理中创建。</p>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择实体" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectableEntities.map((entity) => (
+                      <SelectItem key={entity.id} value={String(entity.id)}>
+                        {entity.name}（{entity.code}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!loadingEntities && entities.length > 0 && selectableEntities.length === 0 && entitySearch && (
+                  <p className="text-xs text-amber-600">未找到匹配的供应商/仓库</p>
+                )}
+                {!loadingEntities && entities.filter(e => ['supplier', 'warehouse', 'supplier_warehouse'].some(t => e.entity_type?.includes(t))).length === 0 && (
+                  <p className="text-xs text-ink-medium">暂无供应商或仓库，请先在实体管理中创建。</p>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm text-ink-dark">退货日期</label>
                   <input
@@ -333,6 +372,21 @@ export default function OrderDetailPage() {
                       value={returnShipping}
                       onChange={(e) => setReturnShipping(e.target.value)}
                       placeholder="请输入退货运费"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-ink-dark">冷藏费</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-medium">¥</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="w-full border border-ink-light rounded-md pl-7 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      value={returnStorageFee}
+                      onChange={(e) => setReturnStorageFee(e.target.value)}
+                      placeholder="退货冷藏费（可选）"
                     />
                   </div>
                 </div>
@@ -554,6 +608,9 @@ export default function OrderDetailPage() {
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">商品</th>
+                  {order.items.some(item => item.batch_no) && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">批次</th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">数量</th>
                   {order.items.some(item => item.gross_weight) && (
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">毛重/净重</th>
@@ -603,6 +660,17 @@ export default function OrderDetailPage() {
                         </Link>
                       )}
                     </td>
+                    {order.items.some(i => i.batch_no) && (
+                      <td className="px-4 py-4 text-sm">
+                        {item.batch_no ? (
+                          <span className="px-2 py-1 bg-purple-50 text-purple-700 rounded text-xs font-mono">
+                            {item.batch_no}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-4 text-sm">
                       {item.unit_quantity && item.unit_quantity > 1 ? (
                         <div>
@@ -638,7 +706,11 @@ export default function OrderDetailPage() {
               </tbody>
               <tfoot className="bg-slate-50 border-t border-slate-200">
                 <tr>
-                  <td colSpan={order.items.some(i => i.gross_weight) ? 4 : 3} className="px-4 py-3 text-right text-sm font-medium text-slate-600">
+                  <td colSpan={
+                    2 + 
+                    (order.items.some(i => i.batch_no) ? 1 : 0) + 
+                    (order.items.some(i => i.gross_weight) ? 1 : 0)
+                  } className="px-4 py-3 text-right text-sm font-medium text-slate-600">
                     商品合计
                   </td>
                   <td className="px-4 py-3 text-right text-lg font-bold text-slate-900">

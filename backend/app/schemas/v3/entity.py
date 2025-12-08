@@ -1,6 +1,6 @@
 """实体Schema"""
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -15,6 +15,12 @@ class EntityBase(BaseModel):
     credit_limit: Optional[float] = Field(None, ge=0, description="信用额度")
     notes: Optional[str] = Field(None, description="备注")
     is_active: bool = Field(default=True, description="是否启用")
+    
+    @field_validator('credit_level', mode='before')
+    @classmethod
+    def fix_null_credit_level(cls, v: Any) -> int:
+        """数据库中的 NULL 值转换为默认值 5"""
+        return v if v is not None else 5
 
 
 class EntityCreate(EntityBase):
@@ -51,6 +57,12 @@ class EntityResponse(EntityBase):
     total_amount: float = 0.0
     receivable_balance: float = 0.0  # 应收余额
     payable_balance: float = 0.0     # 应付余额
+    
+    @field_validator('current_balance', mode='before')
+    @classmethod
+    def fix_null_balance(cls, v: Any) -> float:
+        """数据库中的 NULL 值转换为 0"""
+        return float(v) if v is not None else 0.0
 
     class Config:
         from_attributes = True

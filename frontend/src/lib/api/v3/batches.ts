@@ -19,7 +19,10 @@ export interface StockBatch {
   product_name: string;
   product_code: string;
   product_unit: string;
-  product_specification?: string;  // 商品规格
+  product_specification?: string;  // 商品规格（来自 Product.specification）
+  // 批次规格（同商品不同规格视为不同商品）
+  spec_id?: number;
+  spec_name?: string;  // 规格名称快照，如：大箱、小箱
   // 存放仓库
   storage_entity_id: number;
   storage_entity_name: string;
@@ -76,6 +79,7 @@ export interface BatchListParams {
   page?: number;
   limit?: number;
   product_id?: number;
+  spec_id?: number;  // 商品规格ID（同商品不同规格视为不同商品）
   storage_entity_id?: number;  // 仓库ID
   supplier_id?: number;
   status?: string;
@@ -89,6 +93,10 @@ export interface BatchCreateData {
   warehouse_id: number;
   supplier_id?: number;
   source_order_id?: number;
+  // 规格信息（同商品不同规格视为不同商品）
+  spec_id?: number;
+  spec_name?: string;
+  // 重量
   gross_weight?: number;
   deduction_formula_id?: number;
   initial_quantity: number;
@@ -145,6 +153,7 @@ export const batchesApi = {
     if (params.page) query.set('page', params.page.toString());
     if (params.limit) query.set('limit', params.limit.toString());
     if (params.product_id) query.set('product_id', params.product_id.toString());
+    if (params.spec_id !== undefined) query.set('spec_id', params.spec_id.toString());  // 规格筛选
     if (params.storage_entity_id) query.set('storage_entity_id', params.storage_entity_id.toString());
     if (params.supplier_id) query.set('source_entity_id', params.supplier_id.toString());
     if (params.status) query.set('status', params.status);
@@ -167,10 +176,30 @@ export const batchesApi = {
   
   // 创建（手动创建期初批次）
   create: async (data: BatchCreateData): Promise<StockBatch> => {
+    // 转换字段名适配后端 API
+    const payload = {
+      product_id: data.product_id,
+      storage_entity_id: data.warehouse_id,  // 前端用 warehouse_id，后端用 storage_entity_id
+      source_entity_id: data.supplier_id,    // 前端用 supplier_id，后端用 source_entity_id
+      source_order_id: data.source_order_id,
+      spec_id: data.spec_id,
+      spec_name: data.spec_name,
+      gross_weight: data.gross_weight,
+      deduction_formula_id: data.deduction_formula_id,
+      initial_quantity: data.initial_quantity,
+      cost_price: data.purchase_price,  // 前端用 purchase_price，后端用 cost_price
+      freight_cost: data.freight_cost,
+      freight_rate: data.freight_rate,
+      storage_rate: data.storage_rate,
+      storage_start_date: data.storage_start_date,
+      extra_cost: data.extra_cost,
+      notes: data.notes,
+      is_initial: data.is_initial,
+    };
     const res = await fetch(`${API_BASE}/batches`, {
       method: 'POST',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     return handleResponse(res);
   },
@@ -186,13 +215,27 @@ export const batchesApi = {
   },
   
   // 按产品查询可用批次（用于销售选择）
-  listByProduct: async (productId: number, storageEntityId?: number): Promise<ListResponse<StockBatch>> => {
+  listByProduct: async (productId: number, storageEntityId?: number, specId?: number): Promise<ListResponse<StockBatch>> => {
     const query = new URLSearchParams();
     query.set('product_id', productId.toString());
     query.set('limit', '100');
     if (storageEntityId) query.set('storage_entity_id', storageEntityId.toString());
+    if (specId !== undefined) query.set('spec_id', specId.toString());  // 规格筛选
     
     const res = await fetch(`${API_BASE}/batches?${query}`, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse(res);
+  },
+  
+  // 获取可用批次列表（用于销售时选择，支持规格筛选）
+  listAvailable: async (productId: number, specId?: number, storageEntityId?: number): Promise<StockBatch[]> => {
+    const query = new URLSearchParams();
+    query.set('product_id', productId.toString());
+    if (specId !== undefined) query.set('spec_id', specId.toString());
+    if (storageEntityId) query.set('storage_entity_id', storageEntityId.toString());
+    
+    const res = await fetch(`${API_BASE}/batches/available?${query}`, {
       headers: getAuthHeaders(),
     });
     return handleResponse(res);

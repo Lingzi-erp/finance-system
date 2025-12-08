@@ -8,16 +8,17 @@
 
 from decimal import Decimal
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.v3.business_order import BusinessOrder
+from app.models.v3.order_item import OrderItem
 from app.models.v3.deduction_formula import DeductionFormula
-from app.models.v3.stock_batch import StockBatch, OrderItemBatch
+from app.models.v3.stock_batch import StockBatch, OrderItemBatch, ReturnItemBatch
 from app.api.api_v3.endpoints.stocks import (
     add_stock, reduce_stock, reserve_stock, release_stock
 )
-from app.api.api_v3.endpoints.batches import create_batch_from_purchase
+from app.api.api_v3.endpoints.batches import create_batch_from_purchase, return_to_batch
 
 
 async def _allocate_batches_fifo(
@@ -30,19 +31,34 @@ async def _allocate_batches_fifo(
     
     利润计算依赖批次追溯数据，所以必须在销售确认时自动分配批次。
     批次成本已包含采购时的运费和冷藏费（real_cost_price）。
+    
+    重要：同商品不同规格视为不同商品，必须按 product_id + spec_id 匹配批次。
     """
+    from sqlalchemy import and_, or_
+    
     quantity_needed = Decimal(str(item.quantity))
     total_cost = Decimal("0")
     
-    # 查找该仓库中该商品的可用批次（FIFO：按入库时间升序）
+    # 查找该仓库中该商品+规格的可用批次（FIFO：按入库时间升序）
+    # 同商品不同规格视为不同商品，必须严格匹配 spec_id
+    conditions = [
+        StockBatch.product_id == item.product_id,
+        StockBatch.storage_entity_id == warehouse_id,
+        StockBatch.current_quantity > 0,
+        StockBatch.status != "depleted"
+    ]
+    
+    # 规格匹配：如果订单明细有 spec_id，则批次也必须匹配
+    # 如果订单明细没有 spec_id（旧数据），则匹配无规格的批次
+    if item.spec_id:
+        conditions.append(StockBatch.spec_id == item.spec_id)
+    else:
+        # 无规格的订单明细，匹配无规格的批次（兼容旧数据）
+        conditions.append(or_(StockBatch.spec_id == None, StockBatch.spec_id == item.spec_id))
+    
     result = await db.execute(
         select(StockBatch)
-        .where(
-            StockBatch.product_id == item.product_id,
-            StockBatch.storage_entity_id == warehouse_id,
-            StockBatch.current_quantity > 0,
-            StockBatch.status != "depleted"
-        )
+        .where(and_(*conditions))
         .order_by(StockBatch.received_at.asc())  # 先进先出
     )
     batches = result.scalars().all()
@@ -203,9 +219,11 @@ async def handle_stock_changes(
         
         elif order_type == "return_in":
             # 客户退货：目标仓库入库
+            # 增强：尝试将退货退回到原销售批次
             if not target_warehouse_id:
                 raise HTTPException(status_code=400, detail="退货目标必须是仓库")
             for item in order.items:
+                # 1. 更新库存汇总
                 await add_stock(
                     db=db,
                     warehouse_id=target_warehouse_id,
@@ -215,12 +233,17 @@ async def handle_stock_changes(
                     order_id=order.id,
                     order_item_id=item.id,
                     reason=f"客户退货入库 {order.order_no}")
+                
+                # 2. 尝试退回到原批次（如果有原订单明细关联）
+                await _handle_return_in_batch(db, item, target_warehouse_id, order)
         
         elif order_type == "return_out":
             # 退供应商：来源仓库出库
+            # 增强：支持指定批次退货或 FIFO 自动分配
             if not source_warehouse_id:
                 raise HTTPException(status_code=400, detail="退货来源必须是仓库")
             for item in order.items:
+                # 1. 更新库存汇总
                 await reduce_stock(
                     db=db,
                     warehouse_id=source_warehouse_id,
@@ -230,8 +253,11 @@ async def handle_stock_changes(
                     order_id=order.id,
                     order_item_id=item.id,
                     reason=f"退供应商出库 {order.order_no}",
-                    check_available=True,  # 直接检查可用库存
+                    check_available=True,
                 )
+                
+                # 2. 从批次中扣减（FIFO 或指定批次）
+                await _handle_return_out_batch(db, item, source_warehouse_id, order)
 
 async def rollback_stock_for_delete(
     db: AsyncSession,
@@ -343,4 +369,173 @@ async def rollback_stock_for_delete(
                         order_id=order.id,
                         order_item_id=item.id,
                         reason=f"删除退供应商单回滚出库 {order.order_no}")
+
+
+async def _handle_return_in_batch(
+    db: AsyncSession,
+    item,  # OrderItem (退货明细)
+    warehouse_id: int,
+    order: BusinessOrder
+) -> None:
+    """
+    处理客户退货的批次逻辑
+    
+    尝试将退货退回到原销售批次：
+    1. 如果有 original_item_id，找到原销售明细的批次分配
+    2. 按比例将退货数量退回到对应批次
+    3. 创建 ReturnItemBatch 记录
+    """
+    import json
+    
+    if not item.original_item_id:
+        return  # 没有原订单关联，无法追溯批次
+    
+    # 查找原销售明细
+    original_item = await db.get(OrderItem, item.original_item_id)
+    if not original_item:
+        return
+    
+    # 查找原销售明细的批次分配记录
+    result = await db.execute(
+        select(OrderItemBatch).where(OrderItemBatch.order_item_id == item.original_item_id)
+    )
+    batch_records = result.scalars().all()
+    
+    if not batch_records:
+        return  # 原销售没有批次记录（可能是旧数据）
+    
+    # 按比例分配退货数量到各批次
+    total_sold = sum(r.quantity for r in batch_records)
+    quantity_to_return = Decimal(str(item.quantity))
+    
+    for record in batch_records:
+        if quantity_to_return <= 0:
+            break
+        
+        # 按比例计算该批次应退数量
+        ratio = record.quantity / total_sold if total_sold > 0 else Decimal("0")
+        batch_return_qty = (Decimal(str(item.quantity)) * ratio).quantize(Decimal("0.01"))
+        batch_return_qty = min(batch_return_qty, quantity_to_return)
+        
+        if batch_return_qty <= 0:
+            continue
+        
+        # 退回到原批次
+        batch = await db.get(StockBatch, record.batch_id)
+        if batch:
+            await return_to_batch(db, batch.id, batch_return_qty, f"客户退货 {order.order_no}")
+            
+            # 创建退货批次记录
+            return_batch_record = ReturnItemBatch(
+                order_item_id=item.id,
+                source_batch_id=record.batch_id,  # 原销售批次
+                target_batch_id=record.batch_id,  # 退回到同一批次
+                quantity=batch_return_qty,
+                amount=batch_return_qty * (item.unit_price or Decimal("0")),
+                reason=f"客户退货入库",
+                created_by=1
+            )
+            db.add(return_batch_record)
+        
+        quantity_to_return -= batch_return_qty
+
+
+async def _handle_return_out_batch(
+    db: AsyncSession,
+    item,  # OrderItem (退货明细)
+    warehouse_id: int,
+    order: BusinessOrder
+) -> None:
+    """
+    处理退供应商的批次逻辑
+    
+    支持两种模式：
+    1. 前端指定批次分配：使用 batch_allocations 中的批次
+    2. 自动分配：按 FIFO 从匹配的批次中扣减
+    
+    同时创建 ReturnItemBatch 记录用于追溯
+    """
+    from sqlalchemy import and_, or_
+    import json
+    
+    quantity_needed = Decimal(str(item.quantity))
+    
+    # 检查是否有前端指定的批次分配
+    batch_allocations = item.batch_allocations  # 这是 property，从 JSON 解析
+    
+    if batch_allocations and len(batch_allocations) > 0:
+        # 使用前端指定的批次分配
+        for alloc in batch_allocations:
+            batch_id = alloc.get("batch_id")
+            alloc_qty = Decimal(str(alloc.get("quantity", 0)))
+            storage_fee = Decimal(str(alloc.get("storage_fee", 0)))
+            reason = alloc.get("reason", "退供应商")
+            
+            if alloc_qty <= 0:
+                continue
+            
+            batch = await db.get(StockBatch, batch_id)
+            if not batch:
+                continue
+            
+            # 扣减批次数量
+            actual_qty = min(batch.current_quantity, alloc_qty)
+            batch.current_quantity -= actual_qty
+            batch.update_status()
+            
+            # 创建退货批次记录
+            return_batch_record = ReturnItemBatch(
+                order_item_id=item.id,
+                source_batch_id=batch_id,
+                quantity=actual_qty,
+                amount=actual_qty * (item.unit_price or Decimal("0")),
+                storage_fee=storage_fee,
+                reason=reason,
+                created_by=1
+            )
+            db.add(return_batch_record)
+    else:
+        # FIFO 自动分配（类似销售出库逻辑）
+        conditions = [
+            StockBatch.product_id == item.product_id,
+            StockBatch.storage_entity_id == warehouse_id,
+            StockBatch.current_quantity > 0,
+            StockBatch.status != "depleted"
+        ]
+        
+        # 规格匹配
+        if item.spec_id:
+            conditions.append(StockBatch.spec_id == item.spec_id)
+        else:
+            conditions.append(or_(StockBatch.spec_id == None, StockBatch.spec_id == item.spec_id))
+        
+        result = await db.execute(
+            select(StockBatch)
+            .where(and_(*conditions))
+            .order_by(StockBatch.received_at.asc())  # FIFO
+        )
+        batches = result.scalars().all()
+        
+        for batch in batches:
+            if quantity_needed <= 0:
+                break
+            
+            alloc_qty = min(batch.current_quantity, quantity_needed)
+            
+            # 扣减批次数量
+            batch.current_quantity -= alloc_qty
+            batch.update_status()
+            
+            # 创建退货批次记录
+            return_batch_record = ReturnItemBatch(
+                order_item_id=item.id,
+                source_batch_id=batch.id,
+                quantity=alloc_qty,
+                amount=alloc_qty * (item.unit_price or Decimal("0")),
+                reason=f"退供应商 FIFO分配",
+                created_by=1
+            )
+            db.add(return_batch_record)
+            
+            quantity_needed -= alloc_qty
 

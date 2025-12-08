@@ -41,6 +41,8 @@ export default function BatchesPage() {
   // 筛选
   const [search, setSearch] = useState('');
   const [warehouseId, setWarehouseId] = useState<string>('');
+  const [productId, setProductId] = useState<string>('');  // 商品筛选
+  const [specId, setSpecId] = useState<string>('');        // 规格筛选（同商品不同规格视为不同商品）
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [hasStock, setHasStock] = useState<boolean>(true);
   
@@ -48,6 +50,10 @@ export default function BatchesPage() {
   const [warehouses, setWarehouses] = useState<Entity[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [formulas, setFormulas] = useState<DeductionFormula[]>([]);
+  
+  // 获取当前选中商品的规格列表
+  const selectedProduct = products.find(p => p.id.toString() === productId);
+  const productSpecs = selectedProduct?.specs || [];
   
   // 分页
   const [page, setPage] = useState(1);
@@ -64,6 +70,8 @@ export default function BatchesPage() {
   const [creating, setCreating] = useState(false);
   const [newBatch, setNewBatch] = useState({
     product_id: '',
+    spec_id: '',      // 规格ID（同商品不同规格视为不同商品）
+    spec_name: '',    // 规格名称快照
     warehouse_id: '',
     supplier_id: '',
     gross_weight: '',
@@ -75,6 +83,10 @@ export default function BatchesPage() {
     notes: '',
     is_initial: true,
   });
+  
+  // 新建批次时选中商品的规格列表
+  const newBatchProduct = products.find(p => p.id.toString() === newBatch.product_id);
+  const newBatchSpecs = newBatchProduct?.specs || [];
   
   
   
@@ -122,7 +134,12 @@ export default function BatchesPage() {
   
   useEffect(() => {
     loadBatches();
-  }, [page, warehouseId, statusFilter, hasStock, debouncedSearch]);
+  }, [page, warehouseId, productId, specId, statusFilter, hasStock, debouncedSearch]);
+  
+  // 商品变化时清空规格筛选
+  useEffect(() => {
+    setSpecId('');
+  }, [productId]);
   
   const loadBaseData = async () => {
     try {
@@ -154,6 +171,10 @@ export default function BatchesPage() {
     try {
       const params: any = { page, limit };
       if (warehouseId && warehouseId !== 'all') params.storage_entity_id = parseInt(warehouseId);
+      // 商品筛选
+      if (productId && productId !== 'all') params.product_id = parseInt(productId);
+      // 规格筛选（同商品不同规格视为不同商品）
+      if (specId && specId !== 'all') params.spec_id = parseInt(specId);
       if (statusFilter && statusFilter !== 'all') {
         params.status = statusFilter;
         params.include_depleted = true;  // 需要传这个才能按状态筛选
@@ -209,6 +230,9 @@ export default function BatchesPage() {
         product_id: parseInt(newBatch.product_id),
         warehouse_id: parseInt(newBatch.warehouse_id),
         supplier_id: newBatch.supplier_id ? parseInt(newBatch.supplier_id) : undefined,
+        // 规格信息（同商品不同规格视为不同商品）
+        spec_id: newBatch.spec_id ? parseInt(newBatch.spec_id) : undefined,
+        spec_name: newBatch.spec_name || undefined,
         gross_weight: newBatch.gross_weight ? parseFloat(newBatch.gross_weight) : undefined,
         deduction_formula_id: newBatch.deduction_formula_id && newBatch.deduction_formula_id !== 'none' ? parseInt(newBatch.deduction_formula_id) : undefined,
         initial_quantity: parseFloat(newBatch.initial_quantity),
@@ -222,6 +246,8 @@ export default function BatchesPage() {
       setShowCreateDialog(false);
       setNewBatch({
         product_id: '',
+        spec_id: '',
+        spec_name: '',
         warehouse_id: '',
         supplier_id: '',
         gross_weight: '',
@@ -327,6 +353,43 @@ export default function BatchesPage() {
               </Select>
             </div>
             
+            <div className="w-44">
+              <label className="form-label">商品</label>
+              <Select value={productId} onValueChange={(v) => { setProductId(v); setPage(1); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部商品" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部商品</SelectItem>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* 规格筛选（仅当选择了商品且有规格时显示） */}
+            {productId && productId !== 'all' && productSpecs.length > 0 && (
+              <div className="w-36">
+                <label className="form-label">规格</label>
+                <Select value={specId} onValueChange={(v) => { setSpecId(v); setPage(1); }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="全部规格" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部规格</SelectItem>
+                    {productSpecs.map((s) => (
+                      <SelectItem key={s.id} value={s.id.toString()}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
             <div className="w-36">
               <label className="form-label">状态</label>
               <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
@@ -410,7 +473,14 @@ export default function BatchesPage() {
                         <td>
                           <div className="font-medium text-slate-900">
                             {batch.product_name}
-                            {batch.product_specification && (
+                            {/* 批次规格（同商品不同规格视为不同商品） */}
+                            {batch.spec_name && (
+                              <span className="ml-1.5 px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded text-xs">
+                                {batch.spec_name}
+                              </span>
+                            )}
+                            {/* 商品规格（来自商品表） */}
+                            {batch.product_specification && !batch.spec_name && (
                               <span className="ml-1.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
                                 {batch.product_specification}
                               </span>
@@ -680,7 +750,7 @@ export default function BatchesPage() {
                   <label className="form-label">商品 *</label>
                   <Select 
                     value={newBatch.product_id} 
-                    onValueChange={(v) => setNewBatch({...newBatch, product_id: v})}
+                    onValueChange={(v) => setNewBatch({...newBatch, product_id: v, spec_id: '', spec_name: ''})}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="选择商品" />
@@ -714,6 +784,36 @@ export default function BatchesPage() {
                   </Select>
                 </div>
               </div>
+              
+              {/* 规格选择（如果商品有规格） */}
+              {newBatch.product_id && newBatchSpecs.length > 0 && (
+                <div>
+                  <label className="form-label">规格（同商品不同规格视为不同商品）</label>
+                  <Select 
+                    value={newBatch.spec_id} 
+                    onValueChange={(v) => {
+                      const spec = newBatchSpecs.find(s => s.id.toString() === v);
+                      setNewBatch({
+                        ...newBatch, 
+                        spec_id: v, 
+                        spec_name: spec?.name || ''
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择规格（可选）" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">不指定规格</SelectItem>
+                      {newBatchSpecs.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name} {s.display_name ? `(${s.display_name})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               
               {/* 重量和数量 */}
               <div className="p-4 bg-slate-50 rounded-xl space-y-4">

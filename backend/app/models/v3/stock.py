@@ -7,18 +7,26 @@
 
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, DECIMAL, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, DECIMAL, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
 class Stock(Base):
-    """库存 - 仓库中商品的当前数量"""
+    """库存 - 仓库中商品的当前数量
+    
+    改革说明（v1.2.6+）：
+    - 添加 spec_id 字段，支持同商品不同规格分开记库存
+    - 唯一约束改为 (warehouse_id, product_id, spec_id)
+    - spec_id 为 NULL 时表示不区分规格（向后兼容）
+    """
     __tablename__ = "v3_stocks"
     
-    # 联合唯一约束：同一仓库同一商品只有一条记录
+    # 联合唯一约束：同一仓库同一商品同一规格只有一条记录
+    # 注意：SQLite 中 NULL 值不参与唯一约束比较，所以 spec_id=NULL 的记录可以重复
+    # 这是符合预期的：不区分规格的商品只会有一条记录
     __table_args__ = (
-        UniqueConstraint('warehouse_id', 'product_id', name='uq_warehouse_product'),
+        UniqueConstraint('warehouse_id', 'product_id', 'spec_id', name='uq_warehouse_product_spec'),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -28,6 +36,10 @@ class Stock(Base):
     
     # 商品
     product_id = Column(Integer, ForeignKey("v3_products.id"), nullable=False, index=True)
+    
+    # 商品规格（可选，NULL 表示不区分规格）
+    spec_id = Column(Integer, ForeignKey("v3_product_specs.id"), index=True, comment="商品规格ID")
+    spec_name = Column(String(50), comment="规格名称快照")
     
     # 库存数量（使用DECIMAL支持小数，如10.5kg）
     quantity = Column(DECIMAL(12, 2), nullable=False, default=Decimal("0.00"), comment="当前库存数量")
@@ -50,6 +62,7 @@ class Stock(Base):
     # 关系
     warehouse = relationship("Entity", foreign_keys=[warehouse_id])
     product = relationship("Product", foreign_keys=[product_id])
+    spec = relationship("ProductSpec", foreign_keys=[spec_id])
 
     def __repr__(self):
         return f"<Stock {self.warehouse_id}:{self.product_id} = {self.quantity}>"

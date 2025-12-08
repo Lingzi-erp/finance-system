@@ -12,7 +12,7 @@ from app.models.v3.order_item import OrderItem
 from app.models.v3.order_flow import OrderFlow
 from app.models.v3.role import Role
 from app.models.v3.stock import Stock, StockFlow
-from app.models.v3.stock_batch import StockBatch, OrderItemBatch
+from app.models.v3.stock_batch import StockBatch, OrderItemBatch, ReturnItemBatch
 from app.models.v3.deduction_formula import DeductionFormula
 from app.models.v3.account_balance import AccountBalance
 from app.models.v3.payment_method import PaymentMethod
@@ -37,6 +37,7 @@ __all__ = [
     "StockFlow",
     "StockBatch",
     "OrderItemBatch",
+    "ReturnItemBatch",
     "DeductionFormula",
     "AccountBalance",
     "PaymentMethod",

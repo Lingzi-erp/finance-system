@@ -39,6 +39,9 @@ class StockBatchCreate(StockBatchBase):
     extra_cost_notes: Optional[str] = Field(None, max_length=200, description="其他费用说明")
     is_initial: bool = Field(default=False, description="是否期初数据")
     received_at: Optional[datetime] = Field(None, description="入库日期")
+    # 规格信息（从订单明细复制）
+    spec_id: Optional[int] = Field(None, description="商品规格ID")
+    spec_name: Optional[str] = Field(None, max_length=50, description="规格名称快照，如：大箱")
 
 
 class StockBatchUpdate(BaseModel):
@@ -69,6 +72,10 @@ class StockBatchResponse(BaseModel):
     source_entity_id: Optional[int] = None
     source_order_id: Optional[int] = None
     deduction_formula_id: Optional[int] = None
+    
+    # 规格信息
+    spec_id: Optional[int] = None
+    spec_name: str = ""  # 规格名称，如：大箱、小箱
     
     # 毛重/净重
     gross_weight: Optional[Decimal] = None
@@ -152,6 +159,9 @@ class StockBatchSimple(BaseModel):
     product_id: int
     product_name: str
     storage_entity_name: str
+    # 规格信息
+    spec_id: Optional[int] = None
+    spec_name: str = ""
     # 重量
     gross_weight: Optional[Decimal] = None
     current_quantity: Decimal  # 净重
@@ -211,6 +221,10 @@ class InitialBatchItem(BaseModel):
     """期初批次单项"""
     product_id: int = Field(..., description="商品ID")
     storage_entity_id: int = Field(..., description="存放仓库ID")
+    # 规格信息
+    spec_id: Optional[int] = Field(None, description="商品规格ID")
+    spec_name: Optional[str] = Field(None, max_length=50, description="规格名称快照")
+    # 重量
     gross_weight: Optional[Decimal] = Field(None, ge=0, description="毛重")
     tare_weight: Decimal = Field(default=Decimal("0"), ge=0, description="皮重")
     quantity: Decimal = Field(..., gt=0, description="净重/数量")

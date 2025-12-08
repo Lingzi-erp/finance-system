@@ -10,6 +10,7 @@
 
 from datetime import datetime
 from decimal import Decimal
+import json
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, DECIMAL, Float
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -100,6 +101,10 @@ class OrderItem(Base):
     # 生成的批次ID（采购完成后填入）
     batch_id = Column(Integer, ForeignKey("v3_stock_batches.id"), comment="生成的批次ID")
     
+    # === 批次分配（退货/销售时使用）===
+    # JSON格式: [{"batch_id": 1, "quantity": 10}, {"batch_id": 2, "quantity": 5}]
+    batch_allocations_json = Column(Text, comment="批次分配JSON（退货时记录从哪些批次退货）")
+    
     # 备注
     notes = Column(Text, comment="备注")
     
@@ -132,4 +137,22 @@ class OrderItem(Base):
         else:
             self.cost_amount = None
             self.profit = None
+    
+    @property
+    def batch_allocations(self):
+        """获取批次分配列表"""
+        if self.batch_allocations_json:
+            try:
+                return json.loads(self.batch_allocations_json)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+    
+    @batch_allocations.setter
+    def batch_allocations(self, value):
+        """设置批次分配列表"""
+        if value:
+            self.batch_allocations_json = json.dumps(value)
+        else:
+            self.batch_allocations_json = None
 

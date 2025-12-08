@@ -153,7 +153,27 @@ def build_order_response(order: BusinessOrder) -> BusinessOrderResponse:
             original_item_id=item.original_item_id,
             returned_quantity=returned_qty,
             returnable_quantity=returnable_qty,
-            created_at=item.created_at
+            created_at=item.created_at,
+            # === 规格信息 ===
+            spec_id=item.spec_id,
+            spec_name=item.spec_name or "",
+            # === 包装换算信息 ===
+            container_name=item.container_name,
+            unit_quantity=float(item.unit_quantity) if item.unit_quantity else None,
+            base_unit_symbol=item.base_unit_symbol,
+            pricing_mode=item.pricing_mode or "weight",
+            container_count=float(item.container_count) if item.container_count else None,
+            # === 批次相关 ===
+            gross_weight=float(item.gross_weight) if item.gross_weight else None,
+            deduction_formula_id=item.deduction_formula_id,
+            deduction_formula_name=item.deduction_formula.name if item.deduction_formula else "",
+            storage_rate=float(item.storage_rate) if item.storage_rate else None,
+            batch_id=item.batch_id,
+            batch_no=item.batch.batch_no if item.batch else "",
+            # === 成本相关 ===
+            cost_price=float(item.cost_price) if item.cost_price else None,
+            cost_amount=float(item.cost_amount) if item.cost_amount else None,
+            profit=float(item.profit) if item.profit else None,
         )
         resp.items.append(item_resp)
     
@@ -177,6 +197,8 @@ def build_order_response(order: BusinessOrder) -> BusinessOrderResponse:
 
 def _base_order_query():
     """构建包含常用关联关系的基础查询"""
+    from app.models.v3.stock_batch import StockBatch
+    from app.models.v3.deduction_formula import DeductionFormula
     return select(BusinessOrder).options(
         selectinload(BusinessOrder.source_entity),
         selectinload(BusinessOrder.target_entity),
@@ -184,6 +206,8 @@ def _base_order_query():
         selectinload(BusinessOrder.related_order),
         selectinload(BusinessOrder.return_orders),
         selectinload(BusinessOrder.items).selectinload(OrderItem.product),
+        selectinload(BusinessOrder.items).selectinload(OrderItem.deduction_formula),
+        selectinload(BusinessOrder.items).selectinload(OrderItem.batch),
         selectinload(BusinessOrder.return_orders).selectinload(BusinessOrder.items).selectinload(OrderItem.product),
         selectinload(BusinessOrder.flows).selectinload(OrderFlow.operator))
 
@@ -228,7 +252,21 @@ async def _set_order_items(
                 discount=discount,
                 subtotal=subtotal,
                 notes=item_in.notes,
-                original_item_id=item_in.original_item_id)
+                original_item_id=item_in.original_item_id,
+                # === 规格信息 ===
+                spec_id=item_in.spec_id,
+                spec_name=item_in.spec_name,
+                # === 包装换算信息 ===
+                container_name=item_in.container_name,
+                unit_quantity=item_in.unit_quantity,
+                base_unit_symbol=item_in.base_unit_symbol,
+                pricing_mode=item_in.pricing_mode or "weight",
+                container_count=Decimal(str(item_in.container_count)) if item_in.container_count is not None else None,
+                # === 批次相关 ===
+                gross_weight=Decimal(str(item_in.gross_weight)) if item_in.gross_weight is not None else None,
+                deduction_formula_id=item_in.deduction_formula_id,
+                storage_rate=Decimal(str(item_in.storage_rate)) if item_in.storage_rate is not None else None,
+            )
         )
         
         total_quantity += item_in.quantity
@@ -329,7 +367,19 @@ async def _prepare_return_items(
                 shipping_rate=float(original.shipping_rate) if original.shipping_rate is not None else None,
                 discount=float(_scale_value(original.discount, t.quantity, original.quantity)),
                 notes=f"退货自 {order.order_no}",
-                original_item_id=original.id)
+                original_item_id=original.id,
+                # === 复制规格信息 ===
+                spec_id=original.spec_id,
+                spec_name=original.spec_name,
+                # === 复制包装换算信息 ===
+                container_name=original.container_name,
+                unit_quantity=float(original.unit_quantity) if original.unit_quantity else None,
+                base_unit_symbol=original.base_unit_symbol,
+                pricing_mode=original.pricing_mode or "weight",
+                container_count=float(original.container_count) if original.container_count else None,
+                # === 退货批次分配（指定从哪些批次退货）===
+                batch_allocations=t.batch_allocations,
+            )
         )
         returned_map[original.id] = returned_map.get(original.id, 0) + t.quantity
     
@@ -546,7 +596,20 @@ async def create_order(
             shipping_rate=Decimal(str(item_in.shipping_rate)) if item_in.shipping_rate else None,
             discount=discount,
             subtotal=subtotal,
-            notes=item_in.notes
+            notes=item_in.notes,
+            # === 规格信息 ===
+            spec_id=item_in.spec_id,
+            spec_name=item_in.spec_name,
+            # === 包装换算信息 ===
+            container_name=item_in.container_name,
+            unit_quantity=item_in.unit_quantity,
+            base_unit_symbol=item_in.base_unit_symbol,
+            pricing_mode=item_in.pricing_mode or "weight",
+            container_count=Decimal(str(item_in.container_count)) if item_in.container_count is not None else None,
+            # === 批次相关 ===
+            gross_weight=Decimal(str(item_in.gross_weight)) if item_in.gross_weight is not None else None,
+            deduction_formula_id=item_in.deduction_formula_id,
+            storage_rate=Decimal(str(item_in.storage_rate)) if item_in.storage_rate is not None else None,
         )
         db.add(item)
         
@@ -882,7 +945,9 @@ async def _handle_stock_changes(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"确认业务单 {order.order_no}")
+                    reason=f"确认业务单 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
     
     elif action == "receive" or action == "complete":
         # 完成时：执行实际库存变动
@@ -899,7 +964,9 @@ async def _handle_stock_changes(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"采购入库 {order.order_no}")
+                    reason=f"采购入库 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
         
         elif order_type == "sale":
             # 销售：来源仓库出库
@@ -916,7 +983,8 @@ async def _handle_stock_changes(
                     order_item_id=item.id,
                     reason=f"销售出库 {order.order_no}",
                     check_available=False,  # 已经预留过了
-                )
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
         
         elif order_type == "transfer":
             # 调拨：来源仓库出库，目标仓库入库
@@ -932,7 +1000,9 @@ async def _handle_stock_changes(
                     order_id=order.id,
                     order_item_id=item.id,
                     reason=f"调拨出库 {order.order_no}",
-                    check_available=False)
+                    check_available=False,
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
                 await add_stock(
                     db=db,
                     warehouse_id=target_warehouse_id,
@@ -941,7 +1011,9 @@ async def _handle_stock_changes(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"调拨入库 {order.order_no}")
+                    reason=f"调拨入库 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
         
         elif order_type == "return_in":
             # 客户退货：目标仓库入库
@@ -956,7 +1028,9 @@ async def _handle_stock_changes(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"客户退货入库 {order.order_no}")
+                    reason=f"客户退货入库 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
         
         elif order_type == "return_out":
             # 退供应商：来源仓库出库
@@ -972,7 +1046,9 @@ async def _handle_stock_changes(
                     order_id=order.id,
                     order_item_id=item.id,
                     reason=f"退供应商出库 {order.order_no}",
-                    check_available=False)
+                    check_available=False,
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
     
     elif action == "cancel":
         # 取消时：释放预留的库存
@@ -986,7 +1062,9 @@ async def _handle_stock_changes(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"取消业务单 {order.order_no}")
+                    reason=f"取消业务单 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
 
 async def _rollback_stock_for_delete(
     db: AsyncSession,
@@ -1023,7 +1101,9 @@ async def _rollback_stock_for_delete(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"删除业务单释放预留 {order.order_no}")
+                    reason=f"删除业务单释放预留 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
     
     elif status == "shipping":
         # 运输中：已出库的需要入库回滚
@@ -1037,7 +1117,9 @@ async def _rollback_stock_for_delete(
                     operator_id=1,
                     order_id=order.id,
                     order_item_id=item.id,
-                    reason=f"删除业务单回滚出库 {order.order_no}")
+                    reason=f"删除业务单回滚出库 {order.order_no}",
+                    spec_id=item.spec_id,
+                    spec_name=item.spec_name)
     
     elif status == "completed":
         # 已完成：完全回滚
@@ -1054,7 +1136,9 @@ async def _rollback_stock_for_delete(
                         order_id=order.id,
                         order_item_id=item.id,
                         reason=f"删除采购单回滚入库 {order.order_no}",
-                        check_available=False)
+                        check_available=False,
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
         
         elif order_type == "sale":
             # 销售完成后出库了，需要入库回滚
@@ -1068,7 +1152,9 @@ async def _rollback_stock_for_delete(
                         operator_id=1,
                         order_id=order.id,
                         order_item_id=item.id,
-                        reason=f"删除销售单回滚出库 {order.order_no}")
+                        reason=f"删除销售单回滚出库 {order.order_no}",
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
         
         elif order_type == "transfer":
             # 调拨完成后：来源出库、目标入库，需要双向回滚
@@ -1082,7 +1168,9 @@ async def _rollback_stock_for_delete(
                         operator_id=1,
                         order_id=order.id,
                         order_item_id=item.id,
-                        reason=f"删除调拨单回滚出库 {order.order_no}")
+                        reason=f"删除调拨单回滚出库 {order.order_no}",
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
             if target_warehouse_id:
                 for item in order.items:
                     await reduce_stock(
@@ -1094,7 +1182,9 @@ async def _rollback_stock_for_delete(
                         order_id=order.id,
                         order_item_id=item.id,
                         reason=f"删除调拨单回滚入库 {order.order_no}",
-                        check_available=False)
+                        check_available=False,
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
         
         elif order_type == "return_in":
             # 客户退货完成后入库了，需要出库回滚
@@ -1109,7 +1199,9 @@ async def _rollback_stock_for_delete(
                         order_id=order.id,
                         order_item_id=item.id,
                         reason=f"删除客户退货单回滚入库 {order.order_no}",
-                        check_available=False)
+                        check_available=False,
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
         
         elif order_type == "return_out":
             # 退供应商完成后出库了，需要入库回滚
@@ -1123,7 +1215,9 @@ async def _rollback_stock_for_delete(
                         operator_id=1,
                         order_id=order.id,
                         order_item_id=item.id,
-                        reason=f"删除退供应商单回滚出库 {order.order_no}")
+                        reason=f"删除退供应商单回滚出库 {order.order_no}",
+                        spec_id=item.spec_id,
+                        spec_name=item.spec_name)
 
 @router.delete("/{order_id}")
 async def delete_order(
