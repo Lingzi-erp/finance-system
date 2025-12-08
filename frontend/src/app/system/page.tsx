@@ -23,9 +23,13 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.9';
+const APP_VERSION = '1.2.10';
 const BUILD_DATE = '2024-12-08';
 const CHANGELOG = [
+  { version: '1.2.10', date: '2024-12-08', changes: [
+    '修复后端打包问题：解决 Backend process exited unexpectedly 错误',
+    '完善 PyInstaller 配置：添加 fastapi/uvicorn/starlette 等依赖',
+  ]},
   { version: '1.2.9', date: '2024-12-08', changes: [
     '修复端口检测误判问题：解决启动时错误提示端口被占用',
     '优化端口检测逻辑：增加超时处理和更精确的进程匹配',
