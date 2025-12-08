@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 基本信息
   platform: process.platform,
   isElectron: true,
-  version: '1.2.10',
+  version: '1.2.11',
   
   // 检查更新
   checkForUpdates: () => {
