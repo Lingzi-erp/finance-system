@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.8"
+CURRENT_DB_VERSION = "1.2.9"
 
 
 async def get_db_version(db: AsyncSession) -> str:

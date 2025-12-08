@@ -658,47 +658,94 @@ function forceCleanupBeforeStart() {
 function checkPort(port) {
   return new Promise((resolve) => {
     const server = require('net').createServer();
-    server.once('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        resolve(true); // 端口被占用
-      } else {
+    let resolved = false;
+    
+    // 超时处理 - 3秒内没有响应则认为端口可用
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        try { server.close(); } catch (e) {}
+        console.log(`端口 ${port} 检测超时，假定可用`);
         resolve(false);
       }
+    }, 3000);
+    
+    server.once('error', (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        if (err.code === 'EADDRINUSE') {
+          console.log(`端口 ${port} 被占用 (EADDRINUSE)`);
+          resolve(true); // 端口被占用
+        } else {
+          console.log(`端口 ${port} 检测错误: ${err.code}，假定可用`);
+          resolve(false);
+        }
+      }
     });
+    
     server.once('listening', () => {
-      server.close();
-      resolve(false); // 端口可用
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        server.close();
+        console.log(`端口 ${port} 可用`);
+        resolve(false); // 端口可用
+      }
     });
-    server.listen(port, '127.0.0.1');
+    
+    try {
+      server.listen(port, '127.0.0.1');
+    } catch (err) {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        console.log(`端口 ${port} listen调用失败: ${err.message}，假定可用`);
+        resolve(false);
+      }
+    }
   });
 }
 
 // 获取占用端口的进程信息
 function getPortProcess(port) {
   try {
+    // 使用 PowerShell 更精确地获取本地端口监听信息
     const result = require('child_process').execSync(
-      `netstat -ano | findstr :${port} | findstr LISTENING`,
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+      `powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess"`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 }
     );
-    const lines = result.trim().split('\n');
-    if (lines.length > 0) {
-      const parts = lines[0].trim().split(/\s+/);
-      const pid = parts[parts.length - 1];
-      if (pid && !isNaN(parseInt(pid))) {
-        try {
-          const taskInfo = require('child_process').execSync(
-            `tasklist /FI "PID eq ${pid}" /FO CSV /NH`,
-            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
-          );
-          const match = taskInfo.match(/"([^"]+)"/);
-          return { pid: parseInt(pid), name: match ? match[1] : 'unknown' };
-        } catch (e) {
-          return { pid: parseInt(pid), name: 'unknown' };
-        }
+    const pid = parseInt(result.trim());
+    if (pid && !isNaN(pid)) {
+      try {
+        const taskInfo = require('child_process').execSync(
+          `tasklist /FI "PID eq ${pid}" /FO CSV /NH`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 3000 }
+        );
+        const match = taskInfo.match(/"([^"]+)"/);
+        return { pid: pid, name: match ? match[1] : 'unknown' };
+      } catch (e) {
+        return { pid: pid, name: 'unknown' };
       }
     }
   } catch (e) {
-    // 没有找到占用进程
+    // PowerShell 方法失败，使用备用方案
+    try {
+      const result = require('child_process').execSync(
+        `netstat -ano | findstr "LISTENING" | findstr "127.0.0.1:${port} 0.0.0.0:${port}"`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 }
+      );
+      const lines = result.trim().split('\n');
+      if (lines.length > 0 && lines[0].trim()) {
+        const parts = lines[0].trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && !isNaN(parseInt(pid))) {
+          return { pid: parseInt(pid), name: 'unknown' };
+        }
+      }
+    } catch (e2) {
+      // 没有找到占用进程
+    }
   }
   return null;
 }
@@ -732,10 +779,10 @@ async function cleanupOldProcesses() {
   
   // 启动时先强制清理一遍（双保险第一层）
   forceCleanupBeforeStart();
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await new Promise(resolve => setTimeout(resolve, 500)); // 缩短等待时间
   
   const ports = [8000, 3000];
-  const maxRetries = 3;
+  const maxRetries = 2; // 减少重试次数，因为现在检测更准确了
   
   for (let retry = 0; retry < maxRetries; retry++) {
     const portStatus = {};
@@ -745,13 +792,19 @@ async function cleanupOldProcesses() {
       const inUse = await checkPort(port);
       if (inUse) {
         const proc = getPortProcess(port);
+        // 【关键修复】如果 checkPort 认为被占用，但找不到占用进程，可能是误判
+        if (!proc) {
+          console.log(`端口 ${port} checkPort返回被占用，但找不到占用进程，可能是误判，继续尝试...`);
+          // 不标记为占用，继续检查下一个端口
+          continue;
+        }
         portStatus[port] = proc;
         allClear = false;
-        console.log(`端口 ${port} 被占用: ${proc ? `${proc.name} (PID: ${proc.pid})` : '未知进程'}`);
+        console.log(`端口 ${port} 被占用: ${proc.name} (PID: ${proc.pid})`);
       }
     }
     
-    if (allClear) {
+    if (allClear || Object.keys(portStatus).length === 0) {
       console.log('所有端口可用');
       return true;
     }
@@ -762,7 +815,7 @@ async function cleanupOldProcesses() {
       
       // 先尝试杀死已知的进程名
       try {
-        require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore' });
+        require('child_process').execSync('taskkill /F /IM "backend.exe" /T', { stdio: 'ignore', timeout: 5000 });
       } catch (e) {}
       
       // 针对每个被占用的端口进行清理
@@ -771,7 +824,7 @@ async function cleanupOldProcesses() {
       }
       
       // 等待进程退出
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       continue;
     }
     

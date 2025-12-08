@@ -1,0 +1,47 @@
+[33mtag v1.2.7[m
+Tagger: 3382979992 <3392979992@qq.com>
+Date:   Mon Dec 8 20:41:03 2025 +0800
+
+v1.2.7: 完善退货功能、批次规格管理、统计模块优化
+
+[33mcommit 8b67aed2f8355615784c97558cab86e57d1fa6d0[m[33m ([m[1;33mtag: [m[1;33mv1.2.7[m[33m)[m
+Author: 3382979992 <3392979992@qq.com>
+Date:   Mon Dec 8 20:40:57 2025 +0800
+
+    v1.2.7: 完善退货功能、批次规格管理、统计模块优化
+    
+    主要更新:
+    - 退货功能: 支持多批次退货、部分退货、冷藏费
+    - 批次管理: 支持按规格筛选、修复批次状态显示
+    - 统计模块: 销售/采购统计正确扣除退货金额
+    - 订单页面: 退货单标签显示优化
+    - 数据库迁移: 完善 init_db.py 模型导入
+    - 修复: 批次追溯、规格显示、下拉框样式
+
+ backend/app/api/api_v3/endpoints/batches.py        |  74 [32m+++++[m[31m--[m
+ backend/app/api/api_v3/endpoints/orders.py         | 134 [32m+++++++++++[m[31m--[m
+ backend/app/api/api_v3/endpoints/orders/actions.py |  13 [32m+[m[31m-[m
+ .../app/api/api_v3/endpoints/orders/stock_ops.py   | 217 [32m+++++++++++++++++++[m[31m--[m
+ backend/app/api/api_v3/endpoints/statistics.py     |  95 [32m+++++++++[m
+ backend/app/api/api_v3/endpoints/stocks.py         |  89 [32m+++++++[m[31m--[m
+ backend/app/api/api_v3/endpoints/system.py         |  11 [32m+[m[31m-[m
+ backend/app/db/init_db.py                          |   8 [32m+[m[31m-[m
+ backend/app/db/migrations.py                       |  13 [32m+[m[31m-[m
+ backend/app/models/v3/__init__.py                  |   3 [32m+[m[31m-[m
+ backend/app/models/v3/order_item.py                |  23 [32m+++[m
+ backend/app/models/v3/stock.py                     |  21 [32m+[m[31m-[m
+ backend/app/models/v3/stock_batch.py               |  61 [32m++++++[m
+ backend/app/schemas/v3/business_order.py           |  12 [32m++[m
+ backend/app/schemas/v3/entity.py                   |  16 [32m+[m[31m-[m
+ backend/app/schemas/v3/statistics.py               |   8 [32m+[m
+ backend/app/schemas/v3/stock.py                    |   6 [32m+[m
+ backend/app/schemas/v3/stock_batch.py              |  14 [32m++[m
+ desktop/package.json                               |   2 [32m+[m[31m-[m
+ desktop/preload.js                                 |   2 [32m+[m[31m-[m
+ frontend/src/app/batches/page.tsx                  | 106 [32m+++++++++[m[31m-[m
+ frontend/src/app/orders/[id]/page.tsx              | 122 [32m+++++++++[m[31m---[m
+ frontend/src/app/orders/new/page.tsx               |  59 [32m++++[m[31m--[m
+ frontend/src/app/orders/page.tsx                   |  19 [32m+[m[31m-[m
+ frontend/src/app/system/page.tsx                   |  20 [32m+[m[31m-[m
+ frontend/src/lib/api/v3/batches.ts                 |  49 [32m++++[m[31m-[m
+ 26 files changed, 1062 insertions(+), 135 deletions(-)

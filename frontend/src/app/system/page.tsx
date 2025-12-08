@@ -23,9 +23,14 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.8';
+const APP_VERSION = '1.2.9';
 const BUILD_DATE = '2024-12-08';
 const CHANGELOG = [
+  { version: '1.2.9', date: '2024-12-08', changes: [
+    '修复端口检测误判问题：解决启动时错误提示端口被占用',
+    '优化端口检测逻辑：增加超时处理和更精确的进程匹配',
+    '减少启动时的等待时间',
+  ]},
   { version: '1.2.8', date: '2024-12-08', changes: [
     '修复打包问题：确保所有代码正确包含在安装包中',
   ]},
