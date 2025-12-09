@@ -122,12 +122,15 @@ class OrderFlowResponse(OrderFlowBase):
 # ===== 业务单 =====
 class BusinessOrderBase(BaseModel):
     """业务单基础字段"""
-    order_type: str = Field(..., description="业务类型：purchase,sale,return_in,return_out")
+    # 新架构: loading(装货单), unloading(卸货单)
+    # 兼容旧类型: purchase,sale,return_in,return_out,transfer
+    order_type: str = Field(..., description="业务类型：loading(装货单),unloading(卸货单)")
     source_id: int = Field(..., description="来源实体ID")
     target_id: int = Field(..., description="目标实体ID")
-    order_date: Optional[datetime] = Field(None, description="业务日期")
-    loading_date: Optional[datetime] = Field(None, description="装货日期")
-    unloading_date: Optional[datetime] = Field(None, description="卸货日期")
+    logistics_company_id: Optional[int] = Field(None, description="物流公司ID（装货单必填）")
+    order_date: Optional[datetime] = Field(None, description="业务日期（装货单=装货日期，卸货单=卸货日期）")
+    loading_date: Optional[datetime] = Field(None, description="装货日期（兼容旧数据）")
+    unloading_date: Optional[datetime] = Field(None, description="卸货日期（兼容旧数据）")
     total_discount: float = Field(default=0, ge=0, description="总折扣")
     total_shipping: float = Field(default=0, ge=0, description="总运费")
     total_storage_fee: float = Field(default=0, ge=0, description="总冷藏费")
@@ -145,6 +148,7 @@ class BusinessOrderUpdate(BaseModel):
     """更新业务单（仅草稿状态可更新）"""
     source_id: Optional[int] = None
     target_id: Optional[int] = None
+    logistics_company_id: Optional[int] = None
     order_date: Optional[datetime] = None
     loading_date: Optional[datetime] = None
     unloading_date: Optional[datetime] = None
@@ -164,12 +168,20 @@ class BusinessOrderResponse(BusinessOrderBase):
     status: str
     type_display: str = ""
     status_display: str = ""
+    business_type: str = ""  # X-D-Y业务类型，如 "A-D", "D-B"
+    business_type_display: str = ""  # 业务类型显示名称
     
     # 来源/目标信息
     source_name: str = ""
     source_code: str = ""
+    source_type: str = ""  # 实体类型：supplier/customer/warehouse/transit
     target_name: str = ""
     target_code: str = ""
+    target_type: str = ""  # 实体类型
+    
+    # 物流公司信息
+    logistics_company_name: str = ""
+    logistics_company_code: str = ""
     
     # 汇总
     total_quantity: float = 0
@@ -183,7 +195,7 @@ class BusinessOrderResponse(BusinessOrderBase):
     items: List[OrderItemResponse] = []
     flows: List[OrderFlowResponse] = []
     
-    # 装卸货日期
+    # 装卸货日期（兼容旧数据）
     loading_date: Optional[datetime] = None
     unloading_date: Optional[datetime] = None
     

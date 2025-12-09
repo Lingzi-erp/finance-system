@@ -85,22 +85,22 @@ export default function OrdersPage() {
               <FileText className="w-6 h-6 text-amber-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">进销单据</h1>
-              <p className="text-sm text-slate-500">采购、销售单据管理</p>
+              <h1 className="text-2xl font-bold text-slate-900">业务单据</h1>
+              <p className="text-sm text-slate-500">装货单、卸货单管理</p>
             </div>
           </div>
           {canCreate && (
             <div className="flex gap-2">
-              <Link href="/orders/new?type=purchase">
+              <Link href="/orders/new?type=loading">
                 <Button variant="outline">
                   <Plus className="w-4 h-4 mr-1" />
-                  采购单
+                  装货单
                 </Button>
               </Link>
-              <Link href="/orders/new?type=sale">
+              <Link href="/orders/new?type=unloading">
                 <Button>
                   <Plus className="w-4 h-4 mr-1" />
-                  销售单
+                  卸货单
                 </Button>
               </Link>
             </div>
@@ -123,10 +123,8 @@ export default function OrdersPage() {
                 <SelectTrigger><SelectValue placeholder="全部" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部类型</SelectItem>
-                  <SelectItem value="purchase">采购</SelectItem>
-                  <SelectItem value="sale">销售</SelectItem>
-                  <SelectItem value="return_in">客户退货</SelectItem>
-                  <SelectItem value="return_out">退供应商</SelectItem>
+                  <SelectItem value="loading">装货单</SelectItem>
+                  <SelectItem value="unloading">卸货单</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -205,18 +203,10 @@ export default function OrdersPage() {
                       </span>
                     </td>
                     <td className="text-slate-500">
-                      {/* 采购/退供应商显示装货日期，销售/客户退货显示卸货日期，都没有就用订单日期 */}
-                      {(() => {
-                        if (order.order_type === 'purchase' || order.order_type === 'return_out') {
-                          return order.loading_date 
-                            ? new Date(order.loading_date).toLocaleDateString('zh-CN') 
-                            : (order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '-');
-                        } else {
-                          return order.unloading_date 
-                            ? new Date(order.unloading_date).toLocaleDateString('zh-CN') 
-                            : (order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '-');
-                        }
-                      })()}
+                      {/* 统一显示业务日期 order_date */}
+                      {order.order_date 
+                        ? new Date(order.order_date).toLocaleDateString('zh-CN') 
+                        : '-'}
                     </td>
                     <td>
                       <div className="flex justify-center gap-1">

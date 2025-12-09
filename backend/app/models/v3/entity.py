@@ -1,7 +1,15 @@
 """
 实体模型 - 统一的参与方
-供应商、客户、仓库本质上都是"实体"，只是角色不同
+供应商、客户、仓库、在途仓本质上都是"实体"，只是角色不同
 一个实体可以同时扮演多种角色
+
+实体类型：
+- supplier: 供应商 (A)
+- customer: 客户 (C)
+- warehouse: 仓库 (B)
+- transit: 在途仓 (D) - 系统硬编码的虚拟仓库
+- logistics: 物流公司
+- other: 其他（杂费支出）
 """
 
 from datetime import datetime
@@ -77,18 +85,58 @@ class Entity(Base):
     
     @property
     def is_warehouse(self) -> bool:
-        """是否是仓库"""
-        return "warehouse" in self.entity_type
+        """是否是仓库（不含在途仓）"""
+        return "warehouse" in self.entity_type and "transit" not in self.entity_type
+    
+    @property
+    def is_transit(self) -> bool:
+        """是否是在途仓"""
+        return "transit" in self.entity_type
+    
+    @property
+    def is_logistics(self) -> bool:
+        """是否是物流公司"""
+        return "logistics" in self.entity_type
+    
+    @property
+    def is_other(self) -> bool:
+        """是否是其他（杂费支出）"""
+        return "other" in self.entity_type
+    
+    @property
+    def entity_category(self) -> str:
+        """
+        获取实体类别（用于X-D-Y业务类型判断）
+        A: 供应商
+        B: 仓库
+        C: 客户
+        D: 在途仓
+        """
+        if self.is_transit:
+            return 'D'
+        if self.is_warehouse:
+            return 'B'
+        if self.is_supplier:
+            return 'A'
+        if self.is_customer:
+            return 'C'
+        return 'X'  # 其他类型
     
     @property
     def type_display(self) -> str:
         """类型显示名称"""
         types = []
+        if self.is_transit:
+            types.append("在途仓")
+        elif self.is_warehouse:
+            types.append("仓库")
         if self.is_supplier:
             types.append("供应商")
         if self.is_customer:
             types.append("客户")
-        if self.is_warehouse:
-            types.append("仓库")
+        if self.is_logistics:
+            types.append("物流公司")
+        if self.is_other:
+            types.append("其他")
         return "/".join(types) if types else "未知"
 

@@ -23,20 +23,35 @@ function getAuthHeaders() {
 }
 
 // 版本信息
-const APP_VERSION = '1.2.10';
-const BUILD_DATE = '2024-12-08';
+const APP_VERSION = '2.0.0';
+const BUILD_DATE = '2025-12-09';
 const CHANGELOG = [
+  { version: '2.0.0', date: '2025-12-09', changes: [
+    '🚀 全新业务架构：装货单/卸货单（X-D-Y模式）',
+    '📦 新增在途仓系统实体，支持直销、转发等复杂业务',
+    '💰 财务逻辑重构：按X-D和D-Y分段生成账款',
+    '🎨 前端全面适配新业务类型',
+    '🗑️ 删除旧版统计和车辆管理模块',
+  ]},
+  { version: '1.2.12', date: '2024-12-08', changes: [
+    '🐛 修复下拉框导致界面"锁定"的问题',
+    '🐛 修复采购单"净重"字段显示为"数量"的问题',
+    '🐛 修复采购单净重默认值显示为1的问题',
+  ]},
+  { version: '1.2.11', date: '2024-12-08', changes: [
+    '🔧 修复后端打包路径配置问题',
+    '🔧 确保 Electron 打包包含最新后端',
+  ]},
   { version: '1.2.10', date: '2024-12-08', changes: [
-    '修复后端打包问题：解决 Backend process exited unexpectedly 错误',
-    '完善 PyInstaller 配置：添加 fastapi/uvicorn/starlette 等依赖',
+    '🔧 修复后端打包问题：解决 Backend process exited unexpectedly 错误',
+    '🔧 完善 PyInstaller 配置：添加 fastapi/uvicorn/starlette 等依赖',
   ]},
   { version: '1.2.9', date: '2024-12-08', changes: [
-    '修复端口检测误判问题：解决启动时错误提示端口被占用',
-    '优化端口检测逻辑：增加超时处理和更精确的进程匹配',
-    '减少启动时的等待时间',
+    '🔧 修复端口检测误判问题',
+    '⚡ 优化启动时的端口检测逻辑',
   ]},
   { version: '1.2.8', date: '2024-12-08', changes: [
-    '修复打包问题：确保所有代码正确包含在安装包中',
+    '🔧 修复打包问题：确保所有代码正确包含在安装包中',
   ]},
   { version: '1.2.7', date: '2024-12-08', changes: [
     '退货对话框优化：目标实体只显示供应商和仓库',

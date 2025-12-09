@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 # 当前数据库版本 - 每次有重要更新时递增
-CURRENT_DB_VERSION = "1.2.11"
+CURRENT_DB_VERSION = "2.0.0"  # 在途仓架构重构
 
 
 async def get_db_version(db: AsyncSession) -> str:
@@ -169,6 +169,7 @@ REQUIRED_COLUMNS = [
     ("v3_business_orders", "loading_date", "DATETIME", None),
     ("v3_business_orders", "unloading_date", "DATETIME", None),
     ("v3_business_orders", "calculate_storage_fee", "BOOLEAN", "1"),
+    ("v3_business_orders", "logistics_company_id", "INTEGER", None),  # v2.0.0 在途仓架构
     
     # ========== v3_stock_batches ==========
     ("v3_stock_batches", "received_at", "DATETIME", None),
@@ -254,6 +255,15 @@ SYSTEM_MISC_EXPENSE_ENTITY = {
     "entity_type": "other",
     "is_system": True,  # 标记为系统客商，不可删除
     "credit_level": 5,  # 必须设置，否则为NULL会导致Pydantic验证失败
+}
+
+# 系统实体：在途仓（虚拟仓库，代表货物运输中状态）
+SYSTEM_TRANSIT_WAREHOUSE = {
+    "code": "SYS_TRANSIT",
+    "name": "在途仓",
+    "entity_type": "transit",
+    "is_system": True,  # 系统实体，不可删除
+    "credit_level": 5,
 }
 
 
@@ -432,6 +442,65 @@ async def ensure_misc_expense_entity(db: AsyncSession) -> dict:
     return result
 
 
+async def ensure_transit_warehouse(db: AsyncSession) -> dict:
+    """
+    确保"在途仓"系统实体存在
+    
+    在途仓是虚拟仓库，代表货物正在运输中的状态
+    用于实现 X-D-Y 三元业务结构
+    """
+    result = {
+        "checked": True,
+        "action": "none",
+        "entity_id": None
+    }
+    
+    # 检查表是否存在
+    if not await check_table_exists(db, "v3_entities"):
+        result["action"] = "table_not_exists"
+        return result
+    
+    try:
+        # 检查是否已存在
+        query = await db.execute(text(
+            "SELECT id FROM v3_entities WHERE code = :code"
+        ), {"code": SYSTEM_TRANSIT_WAREHOUSE["code"]})
+        existing = query.fetchone()
+        
+        if existing:
+            result["action"] = "exists"
+            result["entity_id"] = existing[0]
+        else:
+            # 创建在途仓
+            await db.execute(text("""
+                INSERT INTO v3_entities 
+                (code, name, entity_type, credit_level, is_active, is_system, created_by, created_at, updated_at)
+                VALUES (:code, :name, :entity_type, 5, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """), SYSTEM_TRANSIT_WAREHOUSE)
+            await db.commit()
+            
+            # 获取新创建的ID
+            query = await db.execute(text(
+                "SELECT id FROM v3_entities WHERE code = :code"
+            ), {"code": SYSTEM_TRANSIT_WAREHOUSE["code"]})
+            new_entity = query.fetchone()
+            
+            result["action"] = "created"
+            result["entity_id"] = new_entity[0] if new_entity else None
+            logger.info(f"已创建系统实体: {SYSTEM_TRANSIT_WAREHOUSE['name']}")
+            
+    except Exception as e:
+        logger.error(f"确保在途仓失败: {e}")
+        result["action"] = "error"
+        result["error"] = str(e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+    
+    return result
+
+
 async def fix_null_fields(db: AsyncSession) -> dict:
     """
     修复数据库中的 NULL 字段，设置为默认值
@@ -504,6 +573,12 @@ async def run_migrations(db: AsyncSession) -> dict:
         result["misc_expense_entity"] = misc_entity_result
         if misc_entity_result["action"] == "created":
             logger.info("基础数据已创建: 杂费支出客商")
+        
+        # ★ 确保在途仓存在 ★
+        transit_result = await ensure_transit_warehouse(db)
+        result["transit_warehouse"] = transit_result
+        if transit_result["action"] == "created":
+            logger.info("基础数据已创建: 在途仓")
         
         # 更新版本号
         if current_version != CURRENT_DB_VERSION:

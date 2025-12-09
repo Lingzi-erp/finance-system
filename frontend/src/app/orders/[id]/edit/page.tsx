@@ -36,6 +36,8 @@ let editItemIdCounter = 0;
 const generateEditItemId = () => `edit_item_${Date.now()}_${++editItemIdCounter}`;
 
 const ORDER_TYPE_LABELS: Record<string, string> = {
+  loading: '装货单',
+  unloading: '卸货单',
   purchase: '采购单',
   sale: '销售单',
   return_in: '客户退货单',
@@ -121,9 +123,9 @@ export default function EditOrderPage() {
           container_name: item.container_name,
           unit_quantity: item.unit_quantity,
           base_unit_symbol: item.base_unit_symbol,
-          // 根据订单类型推断计价方式：采购默认按件，销售默认按重量
+          // 根据订单类型推断计价方式：装货单默认按件，卸货单默认按重量
           pricing_mode: item.unit_quantity && item.unit_quantity > 1
-            ? (orderData.order_type === 'purchase' ? 'container' : 'weight') 
+            ? (['purchase', 'loading'].includes(orderData.order_type) ? 'container' : 'weight') 
             : 'weight',
         }))
       );
@@ -166,7 +168,7 @@ export default function EditOrderPage() {
           newItems[index].unit_quantity = defaultSpec.quantity;
           newItems[index].base_unit_symbol = defaultSpec.unit_symbol;
           newItems[index].pricing_mode = defaultSpec.quantity > 1
-            ? (order?.order_type === 'purchase' ? 'container' : 'weight')
+            ? (['purchase', 'loading'].includes(order?.order_type || '') ? 'container' : 'weight')
             : 'weight';
         } else {
           newItems[index].pricing_mode = 'weight';
@@ -267,7 +269,10 @@ export default function EditOrderPage() {
   }
 
   const totals = calculateTotals();
+  // 退货单不允许修改来源/目标和商品
   const isReturnOrder = order.order_type.startsWith('return');
+  // 判断是否是新版订单类型
+  const isNewOrderType = ['loading', 'unloading'].includes(order.order_type);
 
   return (
     <div className="min-h-screen bg-paper-white">

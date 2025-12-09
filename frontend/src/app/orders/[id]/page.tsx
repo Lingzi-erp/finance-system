@@ -182,6 +182,23 @@ export default function OrderDetailPage() {
           return;
         }
       }
+      
+      // 校验退货日期不能早于原订单的业务日期
+      if (returnDate && order.order_date) {
+        const returnDateObj = new Date(returnDate);
+        const orderDateObj = new Date(order.order_date);
+        returnDateObj.setHours(0, 0, 0, 0);
+        orderDateObj.setHours(0, 0, 0, 0);
+        if (returnDateObj < orderDateObj) {
+          toast({ 
+            title: '退货日期错误', 
+            description: `退货日期(${returnDate})不能早于原单据的业务日期(${order.order_date.split('T')[0]})`,
+            variant: 'destructive' 
+          });
+          return;
+        }
+      }
+      
       setActionLoading('return');
       const storageFeeValue = parseFloat(returnStorageFee) || 0;
       const payload = {
@@ -219,7 +236,7 @@ export default function OrderDetailPage() {
   const rawActions = order ? ACTIONS_BY_STATUS[order.status] ?? [] : [];
   const isAdmin = true;
   const canDeleteOrder = order && (isAdmin || (order.status === 'draft' && true));
-  const isReturnableType = order ? ['purchase', 'sale'].includes(order.order_type) : false;
+  const isReturnableType = order ? ['loading', 'unloading', 'purchase', 'sale'].includes(order.order_type) : false;
   const hasReturnableItems = order ? order.items.some(item => !item.original_item_id && (item.returnable_quantity ?? 0) > 0) : false;
   const returnableItems = order ? order.items.filter(item => !item.original_item_id && (item.returnable_quantity ?? 0) > 0) : [];
   const totalReturnQty = Object.values(returnSelections).reduce((sum, qty) => sum + (qty || 0), 0);
@@ -359,6 +376,18 @@ export default function OrderDetailPage() {
                     value={returnDate}
                     onChange={(e) => setReturnDate(e.target.value)}
                   />
+                  {/* 退货日期校验警告 */}
+                  {returnDate && order.order_date && (() => {
+                    const returnDateObj = new Date(returnDate);
+                    const orderDateObj = new Date(order.order_date);
+                    returnDateObj.setHours(0, 0, 0, 0);
+                    orderDateObj.setHours(0, 0, 0, 0);
+                    return returnDateObj < orderDateObj;
+                  })() && (
+                    <p className="text-xs text-red-600 mt-1">
+                      🚫 退货日期不能早于原单据业务日期({order.order_date.split('T')[0]})
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-ink-dark">退货运费 *</label>
@@ -415,7 +444,7 @@ export default function OrderDetailPage() {
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex flex-col gap-2">
             <Button variant="ghost" className="w-fit px-0 text-ink-medium hover:text-ink-black" onClick={() => router.push('/orders')}><ArrowLeft className="w-4 h-4 mr-2" />返回业务单列表</Button>
-            <div><div className="flex items-center gap-3 flex-wrap"><h1 className="text-2xl font-bold text-ink-black flex items-center gap-2"><FileText className="w-6 h-6 text-amber-600" />{order.order_no}</h1><span className={`text-xs px-2 py-1 rounded ${ORDER_TYPE_MAP[order.order_type]?.color || 'bg-gray-100'}`}>{order.type_display}</span><span className={`text-xs px-2 py-1 rounded ${ORDER_STATUS_MAP[order.status]?.color || 'bg-gray-100'}`}>{order.status_display}</span></div><p className="text-ink-medium mt-1">{order.order_type === 'purchase' ? '装货日期' : '卸货日期'}：{order.order_type === 'purchase' ? (order.loading_date ? new Date(order.loading_date).toLocaleDateString('zh-CN') : '-') : (order.unloading_date ? new Date(order.unloading_date).toLocaleDateString('zh-CN') : '-')}</p></div>
+            <div><div className="flex items-center gap-3 flex-wrap"><h1 className="text-2xl font-bold text-ink-black flex items-center gap-2"><FileText className="w-6 h-6 text-amber-600" />{order.order_no}</h1><span className={`text-xs px-2 py-1 rounded ${ORDER_TYPE_MAP[order.order_type]?.color || 'bg-gray-100'}`}>{order.type_display}</span>{order.business_type_display && <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-600">{order.business_type_display}</span>}<span className={`text-xs px-2 py-1 rounded ${ORDER_STATUS_MAP[order.status]?.color || 'bg-gray-100'}`}>{order.status_display}</span></div><p className="text-ink-medium mt-1">业务日期：{order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '-'}</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
             {/* 管理员超删按钮 - 只有已完成的单据才显示 */}
@@ -465,12 +494,16 @@ export default function OrderDetailPage() {
             {/* 来源实体 */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                {order.order_type === 'purchase' ? (
+                {order.source_type?.includes('transit') ? (
+                  <><Truck className="w-3.5 h-3.5" />在途仓</>
+                ) : order.source_type?.includes('warehouse') ? (
+                  <><Warehouse className="w-3.5 h-3.5" />仓库</>
+                ) : order.source_type?.includes('supplier') ? (
                   <><Store className="w-3.5 h-3.5" />供应商</>
-                ) : order.order_type === 'sale' ? (
-                  <><Warehouse className="w-3.5 h-3.5" />出库仓库</>
+                ) : order.source_type?.includes('customer') ? (
+                  <><UserCircle2 className="w-3.5 h-3.5" />客户</>
                 ) : (
-                  <><Warehouse className="w-3.5 h-3.5" />源仓库</>
+                  <><Store className="w-3.5 h-3.5" />来源</>
                 )}
               </div>
               <p className="text-lg font-semibold text-slate-900 truncate">{order.source_name}</p>
@@ -489,12 +522,16 @@ export default function OrderDetailPage() {
             {/* 目标实体 */}
             <div className="flex-1 min-w-0 text-right">
               <div className="flex items-center justify-end gap-2 text-xs text-slate-400 mb-1">
-                {order.order_type === 'purchase' ? (
-                  <><Warehouse className="w-3.5 h-3.5" />入库仓库</>
-                ) : order.order_type === 'sale' ? (
-                  <><Store className="w-3.5 h-3.5" />客户</>
+                {order.target_type?.includes('transit') ? (
+                  <><Truck className="w-3.5 h-3.5" />在途仓</>
+                ) : order.target_type?.includes('warehouse') ? (
+                  <><Warehouse className="w-3.5 h-3.5" />仓库</>
+                ) : order.target_type?.includes('customer') ? (
+                  <><UserCircle2 className="w-3.5 h-3.5" />客户</>
+                ) : order.target_type?.includes('supplier') ? (
+                  <><Store className="w-3.5 h-3.5" />供应商</>
                 ) : (
-                  <><Warehouse className="w-3.5 h-3.5" />目标仓库</>
+                  <><Store className="w-3.5 h-3.5" />目标</>
                 )}
               </div>
               <p className="text-lg font-semibold text-slate-900 truncate">{order.target_name}</p>
@@ -539,8 +576,12 @@ export default function OrderDetailPage() {
               </div>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-6 text-sm text-slate-500">
-              {order.loading_date && <span>装货日期：{new Date(order.loading_date).toLocaleDateString('zh-CN')}</span>}
-              {order.unloading_date && <span>卸货日期：{new Date(order.unloading_date).toLocaleDateString('zh-CN')}</span>}
+              {order.order_date && (
+                <span>
+                  {order.order_type === 'loading' ? '装货日期' : order.order_type === 'unloading' ? '卸货日期' : '业务日期'}：
+                  {new Date(order.order_date).toLocaleDateString('zh-CN')}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -750,18 +791,14 @@ export default function OrderDetailPage() {
             </h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between py-1.5 border-b border-slate-100">
-                <span className="text-slate-500">装货日期</span>
-                <span className={order.loading_date ? 'text-slate-900' : 'text-slate-400'}>
-                  {order.loading_date ? new Date(order.loading_date).toLocaleDateString('zh-CN') : '未设置'}
+                <span className="text-slate-500">
+                  {order.order_type === 'loading' ? '装货日期' : order.order_type === 'unloading' ? '卸货日期' : '业务日期'}
+                </span>
+                <span className={order.order_date ? 'text-slate-900' : 'text-slate-400'}>
+                  {order.order_date ? new Date(order.order_date).toLocaleDateString('zh-CN') : '未设置'}
                 </span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-100">
-                <span className="text-slate-500">卸货日期</span>
-                <span className={order.unloading_date ? 'text-slate-900' : 'text-slate-400'}>
-                  {order.unloading_date ? new Date(order.unloading_date).toLocaleDateString('zh-CN') : '未设置'}
-                </span>
-              </div>
-              <div className="flex justify-between py-1.5">
                 <span className="text-slate-500">单据状态</span>
                 <span className={order.completed_at ? 'text-emerald-600 font-medium' : 'text-amber-600 font-medium'}>
                   {order.completed_at ? '已完成' : '草稿'}

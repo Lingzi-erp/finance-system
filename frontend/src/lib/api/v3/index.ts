@@ -47,10 +47,6 @@ export type { PaymentMethod, PaymentMethodSimple, PaymentMethodCreate, PaymentMe
 export { paymentsApi, PAYMENT_TYPE_MAP, PAYMENT_METHOD_MAP } from './payments';
 export type { PaymentRecord, PaymentSummary } from './payments';
 
-// 统计报表
-export { statisticsApi } from './statistics';
-export type { DashboardData, SalesStatItem } from './statistics';
-
 // 数据备份
 export { backupApi } from './backup';
 export type { BackupInfo } from './backup';
@@ -61,8 +57,4 @@ export type { AuditLog } from './audit';
 
 // 批次管理
 export { batchesApi, deductionFormulasApi, BATCH_STATUS_MAP } from './batches';
-export type { StockBatch, BatchListParams, BatchCreateData, BatchUpdateData, DeductionFormula, FormulaCreateData } from './batches';
-
-// 车辆管理
-export { vehiclesApi } from './vehicles';
-export type { Vehicle, VehicleSimple, VehicleListResponse } from './vehicles';
+export type { StockBatch, BatchListParams, BatchCreateData, BatchUpdateData, DeductionFormula, FormulaCreateData, OutboundRecord, ReturnRecord } from './batches';

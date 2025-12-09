@@ -1,92 +1,41 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { statisticsApi, DashboardData } from '@/lib/api/v3';
 import { 
-  Plus, TrendingUp, Truck, 
-  BarChart3, ArrowDownCircle, ArrowUpCircle,
-  Clock, ChevronRight, Sparkles, Wallet
+  Plus, Package, FileText, Receipt, 
+  Warehouse, Users, Settings, Sparkles,
+  ArrowRight, Building2, Boxes
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      // 获取仪表盘数据
-      const dashboardData = await statisticsApi.getDashboard();
-      setDashboard(dashboardData);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  };
-
-  const formatCompactAmount = (amount: number) => {
-    if (amount >= 10000) {
-      return `${(amount / 10000).toFixed(1)}万`;
-    }
-    return amount.toLocaleString();
-  };
-
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner mb-4"></div>
-        <p className="text-slate-500">加载中...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="loading-container">
-        <p className="text-red-500">错误: {error}</p>
-      </div>
-    );
-  }
-
   return (
     <div className="page-container">
       {/* 欢迎区域 */}
       <div className="bg-gradient-to-r from-amber-500 via-amber-500 to-orange-500">
-        <div className="container mx-auto px-4 py-6">
+        <div className="container mx-auto px-4 py-8">
           <div className="flex justify-between items-center">
-          <div>
+            <div>
               <div className="flex items-center gap-2 text-amber-100 text-sm mb-1">
                 <Sparkles className="w-4 h-4" />
                 <span>{new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
               </div>
-              <h1 className="text-2xl font-bold text-white">
+              <h1 className="text-3xl font-bold text-white">
                 {getGreeting()}
-            </h1>
-              <p className="text-amber-100 text-sm mt-1">欢迎使用财务中心</p>
+              </h1>
+              <p className="text-amber-100 text-sm mt-2">欢迎使用财务中心 v2.0</p>
             </div>
             <div className="hidden md:flex gap-2">
-              <Link href="/orders/new?type=purchase">
+              <Link href="/orders/new?type=loading">
                 <Button className="bg-white/20 hover:bg-white/30 text-white border-0">
                   <Plus className="w-4 h-4 mr-1" />
-                  新建采购
+                  新建装货单
                 </Button>
               </Link>
-              <Link href="/orders/new?type=sale">
+              <Link href="/orders/new?type=unloading">
                 <Button className="bg-white hover:bg-white/90 text-amber-600 border-0">
                   <Plus className="w-4 h-4 mr-1" />
-                  新建销售
+                  新建卸货单
                 </Button>
               </Link>
             </div>
@@ -94,167 +43,119 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-6">
-        {dashboard && (
-          <>
-            {/* 今日数据卡片 */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-              <StatCard 
-                icon={<TrendingUp className="w-5 h-5" />}
-                iconBg="bg-emerald-100"
-                iconColor="text-emerald-600"
-                label="今日销售"
-                value={formatAmount(dashboard.today_sales)}
-                subValue={`${dashboard.today_sales_count} 笔订单`}
-              />
-              <StatCard 
-                icon={<Truck className="w-5 h-5" />}
-                iconBg="bg-blue-100"
-                iconColor="text-blue-600"
-                label="今日采购"
-                value={formatAmount(dashboard.today_purchase)}
-                subValue={`${dashboard.today_purchase_count} 笔订单`}
-              />
-              <StatCard 
-                icon={<ArrowDownCircle className="w-5 h-5" />}
-                iconBg="bg-green-100"
-                iconColor="text-green-600"
-                label="今日收款"
-                value={formatAmount(dashboard.today_received)}
-                valueColor="text-green-600"
-              />
-              <StatCard 
-                icon={<ArrowUpCircle className="w-5 h-5" />}
-                iconBg="bg-orange-100"
-                iconColor="text-orange-600"
-                label="今日付款"
-                value={formatAmount(dashboard.today_paid)}
-                valueColor="text-orange-600"
-              />
-              <StatCard 
-                icon={<Clock className="w-5 h-5" />}
-                iconBg="bg-amber-100"
-                iconColor="text-amber-600"
-                label="待处理"
-                value={`${dashboard.pending_orders} 单`}
-                subValue={`草稿 ${dashboard.draft_orders} 单`}
-              />
-            </div>
-              
-            {/* 主要内容区 */}
-            <div className="grid grid-cols-1 xl:grid-cols-5 lg:grid-cols-3 gap-6 mb-8">
-              {/* 本月业务概览 */}
-              <div className="xl:col-span-3 lg:col-span-2 card-base p-6">
-                <div className="flex justify-between items-center mb-5">
-                  <h2 className="section-title">本月业务</h2>
-                  <Link href="/statistics" className="text-sm text-amber-600 hover:text-amber-700 flex items-center gap-1">
-                    查看报表 <ChevronRight className="w-4 h-4" />
-                  </Link>
-              </div>
-              
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                  <div className="text-center p-4 bg-slate-50 rounded-xl">
-                    <p className="text-2xl font-bold text-slate-900">{formatCompactAmount(dashboard.month_sales)}</p>
-                    <p className="text-sm text-slate-500 mt-1">销售额</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-xl">
-                    <p className="text-2xl font-bold text-slate-900">{formatCompactAmount(dashboard.month_purchase)}</p>
-                    <p className="text-sm text-slate-500 mt-1">采购额</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-xl">
-                    <p className="text-2xl font-bold text-slate-900">{dashboard.month_sales_count}</p>
-                    <p className="text-sm text-slate-500 mt-1">销售单数</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-xl">
-                    <p className="text-2xl font-bold text-slate-900">{dashboard.month_purchase_count}</p>
-                    <p className="text-sm text-slate-500 mt-1">采购单数</p>
-              </div>
-            </div>
-
-            {/* 销售趋势图 */}
-            {dashboard.sales_trend.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-medium text-slate-600 mb-3 flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-slate-400" />
-                  近7天销售趋势
-                </h3>
-                    <div className="flex items-end gap-2 h-28 px-2">
-                  {dashboard.sales_trend.map((item, idx) => {
-                    const maxAmount = Math.max(...dashboard.sales_trend.map(i => i.amount), 1);
-                    const height = (item.amount / maxAmount) * 100;
-                    return (
-                          <div key={idx} className="flex-1 flex flex-col items-center group">
-                            <div className="w-full relative">
-                        <div 
-                                className="w-full bg-gradient-to-t from-amber-500 to-amber-400 rounded-t-md transition-all group-hover:from-amber-600 group-hover:to-amber-500 cursor-pointer relative"
-                                style={{ height: `${Math.max(height, 8)}%`, minHeight: '8px' }}
-                              >
-                                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                  {formatAmount(item.amount)}
-                                </div>
-                              </div>
-                            </div>
-                            <span className="text-xs text-slate-400 mt-2">{item.date}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-        </div>
-            )}
-              </div>
-
-              {/* 往来账款 */}
-              <div className="xl:col-span-2 card-base p-6">
-                <div className="flex justify-between items-center mb-5">
-                  <h2 className="section-title">往来账款</h2>
-                  <Link href="/accounts" className="text-sm text-amber-600 hover:text-amber-700 flex items-center gap-1">
-                    详情 <ChevronRight className="w-4 h-4" />
-              </Link>
-        </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                        <ArrowDownCircle className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                        <p className="text-sm text-green-700">应收余额</p>
-                        <p className="text-xl font-bold text-green-600">{formatAmount(dashboard.total_receivable)}</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                        <ArrowUpCircle className="w-5 h-5 text-orange-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-orange-700">应付余额</p>
-                        <p className="text-xl font-bold text-orange-600">{formatAmount(dashboard.total_payable)}</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
-                        <Wallet className="w-5 h-5 text-slate-600" />
-                  </div>
-                  <div>
-                        <p className="text-sm text-slate-600">净往来</p>
-                        <p className={`text-xl font-bold ${dashboard.total_receivable - dashboard.total_payable >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
-                          {formatAmount(dashboard.total_receivable - dashboard.total_payable)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-            </div>
-              </div>
+      <div className="container mx-auto px-4 py-8">
+        {/* 快速入口 */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">快速入口</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickLink 
+              href="/orders"
+              icon={<FileText className="w-6 h-6" />}
+              label="业务单据"
+              description="装货单、卸货单"
+              color="bg-amber-500"
+            />
+            <QuickLink 
+              href="/stocks"
+              icon={<Boxes className="w-6 h-6" />}
+              label="库存台账"
+              description="库存管理与流水"
+              color="bg-blue-500"
+            />
+            <QuickLink 
+              href="/accounts"
+              icon={<Receipt className="w-6 h-6" />}
+              label="往来账款"
+              description="应收应付管理"
+              color="bg-green-500"
+            />
+            <QuickLink 
+              href="/entities"
+              icon={<Building2 className="w-6 h-6" />}
+              label="客商管理"
+              description="供应商、客户、仓库"
+              color="bg-purple-500"
+            />
           </div>
-          </>
-        )}
+        </div>
+
+        {/* 功能模块 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 基础资料 */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <Package className="w-5 h-5 text-slate-500" />
+              基础资料
+            </h3>
+            <div className="space-y-2">
+              <ModuleLink href="/products" label="商品管理" description="商品信息、规格、分类" />
+              <ModuleLink href="/entities" label="客商管理" description="供应商、客户、仓库、物流" />
+              <ModuleLink href="/categories" label="商品分类" description="分类层级管理" />
+              <ModuleLink href="/deduction-formulas" label="扣重公式" description="采购扣重规则" />
+            </div>
+          </div>
+
+          {/* 业务处理 */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-slate-500" />
+              业务处理
+            </h3>
+            <div className="space-y-2">
+              <ModuleLink href="/orders" label="业务单据" description="装货单、卸货单管理" />
+              <ModuleLink href="/stocks" label="库存台账" description="库存查询与流水" />
+              <ModuleLink href="/batches" label="批次追溯" description="批次出入库追踪" />
+            </div>
+          </div>
+
+          {/* 财务管理 */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-slate-500" />
+              财务管理
+            </h3>
+            <div className="space-y-2">
+              <ModuleLink href="/accounts" label="往来账款" description="应收应付余额" />
+              <ModuleLink href="/payments" label="资金流水" description="收付款记录" />
+              <ModuleLink href="/payment-methods" label="收付款方式" description="账户管理" />
+            </div>
+          </div>
+
+          {/* 系统设置 */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-slate-500" />
+              系统设置
+            </h3>
+            <div className="space-y-2">
+              <ModuleLink href="/system" label="系统维护" description="数据初始化、升级" />
+              <ModuleLink href="/backup" label="数据备份" description="备份与恢复" />
+            </div>
+          </div>
+        </div>
+
+        {/* 版本说明 */}
+        <div className="mt-8 bg-gradient-to-br from-slate-50 to-amber-50 rounded-xl border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-3">🚀 v2.0 新架构</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-600">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span><strong>装货单/卸货单</strong>：全新X-D-Y业务模式，支持直销、转发等复杂场景</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span><strong>在途仓</strong>：货物在途状态跟踪，解耦装卸时间</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span><strong>分段账款</strong>：按装货(X→D)和卸货(D→Y)分别生成财务记录</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span><strong>批次追溯</strong>：通过批次关联上下游订单</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -272,32 +173,42 @@ function getGreeting() {
   return '夜深了';
 }
 
-// 统计卡片组件
-function StatCard({ 
+// 快速入口卡片
+function QuickLink({ 
+  href, 
   icon, 
-  iconBg, 
-  iconColor, 
   label, 
-  value, 
-  subValue,
-  valueColor = 'text-slate-900'
-}: {
-  icon: React.ReactNode;
-  iconBg: string;
-  iconColor: string;
-  label: string;
-  value: string;
-  subValue?: string;
-  valueColor?: string;
+  description,
+  color 
+}: { 
+  href: string; 
+  icon: React.ReactNode; 
+  label: string; 
+  description: string;
+  color: string;
 }) {
   return (
-    <div className="stat-card">
-      <div className={`stat-card-icon ${iconBg}`}>
-        <div className={iconColor}>{icon}</div>
+    <Link href={href} className="block group">
+      <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-all hover:border-slate-300">
+        <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center text-white mb-3`}>
+          {icon}
+        </div>
+        <h3 className="font-semibold text-slate-900 group-hover:text-amber-600 transition-colors">{label}</h3>
+        <p className="text-sm text-slate-500 mt-1">{description}</p>
       </div>
-      <p className="stat-card-label">{label}</p>
-      <p className={`stat-card-value ${valueColor}`}>{value}</p>
-      {subValue && <p className="stat-card-sub">{subValue}</p>}
-    </div>
+    </Link>
+  );
+}
+
+// 模块链接
+function ModuleLink({ href, label, description }: { href: string; label: string; description: string }) {
+  return (
+    <Link href={href} className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 transition-colors group">
+      <div>
+        <span className="text-slate-900 group-hover:text-amber-600 transition-colors">{label}</span>
+        <span className="text-slate-400 text-sm ml-2">{description}</span>
+      </div>
+      <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors" />
+    </Link>
   );
 }

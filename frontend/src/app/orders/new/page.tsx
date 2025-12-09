@@ -69,7 +69,7 @@ export default function NewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [orderType, setOrderType] = useState(searchParams.get('type') || 'purchase');
+  const [orderType, setOrderType] = useState(searchParams.get('type') || 'loading');
   const [sourceId, setSourceId] = useState<number>(0);
   const [targetId, setTargetId] = useState<number>(0);
   const [notes, setNotes] = useState('');
@@ -89,30 +89,46 @@ export default function NewOrderPage() {
   const [otherFee, setOtherFee] = useState<number>(0); // 其他费用（手动输入）
   const [calculateStorageFee, setCalculateStorageFee] = useState<boolean>(true); // 是否计算冷藏费
   
-  // 装卸货日期
-  const [loadingDate, setLoadingDate] = useState<string>('');
-  const [unloadingDate, setUnloadingDate] = useState<string>('');
+  // 业务日期（装货单=装货日期，卸货单=卸货日期）
+  const [orderDate, setOrderDate] = useState<string>('');
   
-  // 自动计算冷藏费 - 直接计算，每次渲染都重新计算
-  // 采购单：每吨15元（入库费）
-  // 销售单：每吨15元（出库费）+ 每吨每天1.5元（存储费）
-  // 存储天数 = 装货日期 - 批次入库日期
-  const calculateStorageFeeNow = (): number => {
-    if (!calculateStorageFee) return 0;
+  // 自动计算冷藏费状态
+  const [storageFee, setStorageFeeValue] = useState<number>(0);
+  
+  // 判断来源实体类型
+  const sourceEntity = useMemo(() => entities.find(e => e.id === sourceId), [entities, sourceId]);
+  const targetEntity = useMemo(() => entities.find(e => e.id === targetId), [entities, targetId]);
+  const isSourceWarehouse = sourceEntity?.entity_type.includes('warehouse') && !sourceEntity?.entity_type.includes('transit');
+  const isTargetWarehouse = targetEntity?.entity_type.includes('warehouse') && !targetEntity?.entity_type.includes('transit');
+  
+  // 自动计算冷藏费 - 使用 useEffect 确保依赖项变化时重新计算
+  // 装货单(X→D)：如果X是仓库(B)，计算 出库费+存储费
+  // 卸货单(D→Y)：如果Y是仓库(B)，只计算 入库费
+  useEffect(() => {
+    if (!calculateStorageFee) {
+      setStorageFeeValue(0);
+      return;
+    }
     
-    const baseRatePerTon = 15;
-    const storageCostPerTonPerDay = 1.5;
+    const baseRatePerTon = 15;  // 出入库费：15元/吨
+    const storageCostPerTonPerDay = 1.5;  // 存储费：1.5元/吨/天
     
-    if (orderType === 'purchase') {
-      const totalWeight = items.reduce((sum, item) => {
-        if (!item.spec_id || !item.unit_quantity) return sum + item.quantity;
-        if (item.pricing_mode === 'container') return sum + item.quantity * item.unit_quantity;
-        return sum + item.quantity;
-      }, 0);
-      const weightTons = totalWeight / 1000;
-      return Math.round(weightTons * baseRatePerTon * 100) / 100;
-    } else if (orderType === 'sale') {
-      if (!loadingDate) return 0;
+    const totalWeight = items.reduce((sum, item) => {
+      if (!item.spec_id || !item.unit_quantity) return sum + item.quantity;
+      if (item.pricing_mode === 'container') return sum + item.quantity * item.unit_quantity;
+      return sum + item.quantity;
+    }, 0);
+    const weightTons = totalWeight / 1000;
+    
+    if (orderType === 'unloading' && isTargetWarehouse) {
+      // 卸货单，目标是仓库：只计算入库费
+      setStorageFeeValue(Math.round(weightTons * baseRatePerTon * 100) / 100);
+    } else if (orderType === 'loading' && isSourceWarehouse) {
+      // 装货单，来源是仓库：计算出库费 + 存储费
+      if (!orderDate) {
+        setStorageFeeValue(0);
+        return;
+      }
       
       let totalStorageFee = 0;
       
@@ -126,14 +142,23 @@ export default function NewOrderPage() {
         const itemWeightTons = itemWeight / 1000;
         const baseFee = itemWeightTons * baseRatePerTon;
         
+        // 获取批次入库日期：优先用户选择的批次，否则从可用批次列表获取
+        let receivedAtStr: string | undefined = item.batch_allocations?.[0]?.received_at;
+        if (!receivedAtStr) {
+          const batchCacheKey = item.product_id.toString();
+          const availableBatches = productBatches[batchCacheKey] || [];
+          if (availableBatches.length > 0 && availableBatches[0].received_at) {
+            receivedAtStr = availableBatches[0].received_at;
+          }
+        }
+        
         let storageDays = 0;
-        if (item.batch_allocations?.[0]?.received_at) {
-          const loadDate = new Date(loadingDate);
-          const receivedDate = new Date(item.batch_allocations[0].received_at);
-          loadDate.setHours(0, 0, 0, 0);
+        if (receivedAtStr) {
+          const businessDate = new Date(orderDate);
+          const receivedDate = new Date(receivedAtStr);
+          businessDate.setHours(0, 0, 0, 0);
           receivedDate.setHours(0, 0, 0, 0);
-          const diffTime = loadDate.getTime() - receivedDate.getTime();
-          // 存储天数 = 装货日期 - 入库日期 + 1（入库当天算一天）
+          const diffTime = businessDate.getTime() - receivedDate.getTime();
           storageDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1);
         }
         
@@ -141,13 +166,68 @@ export default function NewOrderPage() {
         totalStorageFee += baseFee + storageCost;
       });
       
-      return Math.round(totalStorageFee * 100) / 100;
+      setStorageFeeValue(Math.round(totalStorageFee * 100) / 100);
+    } else {
+      // 其他情况（非仓库相关）不计算冷藏费
+      setStorageFeeValue(0);
     }
-    return 0;
+  }, [calculateStorageFee, orderType, items, orderDate, productBatches, isSourceWarehouse, isTargetWarehouse]);
+  
+  // 判断包装规格是否为散装（按基础单位计价）
+  const isItemSpecBulk = (item: OrderItemForm) => {
+    return (item.unit_quantity === 1 && item.spec_name?.includes('散装'));
   };
   
-  // 每次渲染时计算冷藏费
-  const storageFee = calculateStorageFeeNow();
+  // 获取批次缓存键（批次按商品分，不按包装规格分）
+  const getBatchCacheKey = (item: OrderItemForm) => {
+    return item.product_id.toString();
+  };
+  
+  // 计算所有批次中最晚的入库日期（用于装货单从仓库出货时的日期校验）
+  // 优先使用用户选择的批次，否则使用可用批次列表中最晚的
+  const latestBatchReceivedDate = useMemo(() => {
+    // 只有装货单且来源是仓库时才需要校验
+    if (!(orderType === 'loading' && isSourceWarehouse)) return null;
+    
+    let latest: { date: Date; productName: string; batchNo: string; receivedAt: string } | null = null;
+    
+    for (const item of items) {
+      if (!item.product_id) continue;
+      
+      // 优先使用用户选择的批次
+      if (item.batch_allocations?.[0]?.received_at) {
+        const batchDate = new Date(item.batch_allocations[0].received_at);
+        batchDate.setHours(0, 0, 0, 0);
+        if (!latest || batchDate > latest.date) {
+          latest = {
+            date: batchDate,
+            productName: item.product_name || '',
+            batchNo: item.batch_allocations[0].batch_no || '',
+            receivedAt: item.batch_allocations[0].received_at.split('T')[0]
+          };
+        }
+      } else {
+        // 如果没有选择批次，从可用批次列表中找最晚的入库日期
+        const batchCacheKey = getBatchCacheKey(item);
+        const availableBatches = productBatches[batchCacheKey] || [];
+        for (const batch of availableBatches) {
+          if (batch.received_at) {
+            const batchDate = new Date(batch.received_at);
+            batchDate.setHours(0, 0, 0, 0);
+            if (!latest || batchDate > latest.date) {
+              latest = {
+                date: batchDate,
+                productName: item.product_name || '',
+                batchNo: batch.batch_no || '',
+                receivedAt: batch.received_at.split('T')[0]
+              };
+            }
+          }
+        }
+      }
+    }
+    return latest;
+  }, [orderType, items, productBatches, isSourceWarehouse]);
   
   // 物流公司列表
   const logisticsCompanies = entities.filter(e => e.entity_type.includes('logistics'));
@@ -160,10 +240,9 @@ export default function NewOrderPage() {
     return !!item.spec_id && !!item.unit_quantity;
   };
   
-  // 判断规格是否为散装（按基础单位计价）
+  // 判断规格是否为散装（按基础单位计价）- 原版保留给其他地方使用
   const isSpecBulk = (item: OrderItemForm) => {
-    // 如果每单位数量是1且名称包含"散装"，视为散装
-    return (item.unit_quantity === 1 && item.spec_name?.includes('散装'));
+    return isItemSpecBulk(item);
   };
   
   // 获取当前规格的容器名称（件、箱等）
@@ -204,14 +283,14 @@ export default function NewOrderPage() {
 
   useEffect(() => { loadBaseData(); }, []);
   
-  // 当销售来源是仓库时，加载该仓库的库存
+  // 当装货单来源是仓库时，加载该仓库的库存（用于出库选批次）
   useEffect(() => {
-    if (orderType === 'sale' && sourceId) {
+    if (orderType === 'loading' && sourceId && isSourceWarehouse) {
       loadWarehouseStocks(sourceId);
     } else {
       setWarehouseStocks([]);
     }
-  }, [orderType, sourceId]);
+  }, [orderType, sourceId, isSourceWarehouse]);
 
   const loadBaseData = async () => {
     try {
@@ -250,41 +329,49 @@ export default function NewOrderPage() {
     }
   };
 
+  // 装货单：任意来源 → 在途仓
+  // 卸货单：在途仓 → 任意目标
   const getSourceOptions = () => {
     switch (orderType) {
-      case 'purchase': return entities.filter(e => e.entity_type.includes('supplier'));
-      case 'sale': return entities.filter(e => e.entity_type.includes('warehouse'));
+      case 'loading': 
+        // 装货单来源：供应商(A)、仓库(B)、客户(C) - 不包含在途仓
+        return entities.filter(e => !e.entity_type.includes('transit') && !e.entity_type.includes('logistics') && !e.entity_type.includes('other'));
+      case 'unloading': 
+        // 卸货单来源：在途仓
+        return entities.filter(e => e.entity_type.includes('transit'));
       default: return entities;
     }
   };
 
   const getTargetOptions = () => {
     switch (orderType) {
-      case 'purchase': return entities.filter(e => e.entity_type.includes('warehouse'));
-      case 'sale': return entities.filter(e => e.entity_type.includes('customer'));
+      case 'loading': 
+        // 装货单目标：在途仓
+        return entities.filter(e => e.entity_type.includes('transit'));
+      case 'unloading': 
+        // 卸货单目标：仓库(B)、客户(C)、供应商(A) - 不包含在途仓
+        return entities.filter(e => !e.entity_type.includes('transit') && !e.entity_type.includes('logistics') && !e.entity_type.includes('other'));
       default: return entities;
     }
   };
 
   const addItem = () => { 
-    // 默认计价方式：采购按件，销售按重量
-    const defaultPricingMode = orderType === 'purchase' ? 'container' : 'weight';
+    // 默认计价方式：统一按重量（可通过选择规格改变）
     setItems([...items, { 
       _id: generateItemId(),  // 唯一标识
       product_id: 0, product_name: '', product_unit: '', 
-      pricing_mode: defaultPricingMode,
+      pricing_mode: 'weight',
       quantity: 1, unit_price: 0, shipping_cost: 0, notes: '', 
       available_quantity: undefined, batch_allocations: [], unit_count: 1 
     }]); 
   }
   
-  // 加载产品的可用批次（按规格筛选）
-  const loadProductBatches = async (productId: number, warehouseId: number, specId?: number) => {
-    // 使用 productId + specId 作为缓存键，因为同商品不同规格视为不同商品
-    const cacheKey = specId ? `${productId}_${specId}` : productId.toString();
+  // 加载产品的可用批次（批次按商品分，不按包装规格分）
+  const loadProductBatches = async (productId: number, warehouseId: number) => {
+    const cacheKey = productId.toString();
     if (productBatches[cacheKey]) return; // 已加载过
     try {
-      const res = await batchesApi.listByProduct(productId, warehouseId, specId);
+      const res = await batchesApi.listByProduct(productId, warehouseId);
       setProductBatches(prev => ({ ...prev, [cacheKey]: res.data }));
     } catch (err) {
       console.error('Failed to load batches:', err);
@@ -362,19 +449,29 @@ export default function NewOrderPage() {
           newItems[index].container_name = defaultSpec.container_name;
           newItems[index].unit_quantity = defaultSpec.quantity;
           newItems[index].base_unit_symbol = defaultSpec.unit_symbol;
-          newItems[index].pricing_mode = orderType === 'purchase' ? 'container' : 'weight';
+          // 规格决定计价方式：散装按重量，否则按件
+          const isBulk = defaultSpec.quantity === 1 && defaultSpec.name?.includes('散装');
+          newItems[index].pricing_mode = isBulk ? 'weight' : 'container';
         } else {
-          // 无规格：使用基础单位
+          // 无规格：使用基础单位，按重量计价
           newItems[index].pricing_mode = 'weight';
         }
+        
+        // 按重量计量的商品：净重初始为0，等待毛重计算（采购单和销售单都适用）
+        const needsGrossWeight = (defaultSpec && defaultSpec.quantity === 1 && defaultSpec.name?.includes('散装')) 
+          || (!defaultSpec && isWeightBasedUnit(product.unit));
+        if (needsGrossWeight) {
+          newItems[index].quantity = 0;
+          newItems[index].gross_weight = undefined;
+        }
       }
-      // 如果是销售，查找库存信息并加载批次
-      if (orderType === 'sale') {
+      // 如果是从仓库装货，查找库存信息并加载批次
+      if (orderType === 'loading' && isSourceWarehouse) {
         const stock = warehouseStocks.find(s => s.product_id === value);
         newItems[index].available_quantity = stock?.available_quantity;
         // 清空之前的批次选择
         newItems[index].batch_allocations = [];
-        // 加载该商品的可用批次
+        // 加载该商品的可用批次（批次按商品分，不按包装规格分）
         if (sourceId > 0) {
           loadProductBatches(value, sourceId);
         }
@@ -400,11 +497,8 @@ export default function NewOrderPage() {
         newItems[index].gross_weight = undefined;
         newItems[index].deduction_formula_id = undefined;
         
-        // 销售时：规格变化，重新加载该规格的批次（同商品不同规格视为不同商品）
-        if (orderType === 'sale' && sourceId > 0 && item.product_id) {
-          newItems[index].batch_allocations = [];  // 清空批次选择
-          loadProductBatches(item.product_id, sourceId, value);
-        }
+        // 包装规格变化不需要重新加载批次（批次按商品分，不按包装规格分）
+        // 但保留已选批次，因为还是同一个商品的库存
       }
     }
     setItems(newItems);
@@ -457,16 +551,16 @@ export default function NewOrderPage() {
     };
   };
 
-  // 获取可选商品列表（销售时根据库存过滤，支持搜索过滤）
+  // 获取可选商品列表（从仓库出货时根据库存过滤，支持搜索过滤）
   const getAvailableProducts = () => {
     let result = products;
     
-    // 销售时，仅返回有库存的商品
-    if (orderType === 'sale') {
+    // 从仓库装货时，仅返回有库存的商品
+    if (orderType === 'loading' && isSourceWarehouse) {
       const stockProductIds = warehouseStocks.map(s => s.product_id);
       result = result.filter(p => stockProductIds.includes(p.id));
     }
-    // 直销从供应商发货，可选择任意商品（不走库存）
+    // 从供应商/客户装货时，可选择任意商品（不走库存）
     
     // 搜索过滤
     if (productSearch.trim()) {
@@ -490,9 +584,9 @@ export default function NewOrderPage() {
     return p.name;
   };
   
-  // 获取商品的可用库存（仅销售单有意义）
+  // 获取商品的可用库存（仅从仓库装货时有意义）
   const getProductAvailableQuantity = (productId: number): number | undefined => {
-    if (orderType !== 'sale') return undefined;
+    if (!(orderType === 'loading' && isSourceWarehouse)) return undefined;
     const stock = warehouseStocks.find(s => s.product_id === productId);
     return stock?.available_quantity;
   };
@@ -501,43 +595,68 @@ export default function NewOrderPage() {
     if (!sourceId || !targetId) { toast({ title: '请选择来源和目标', variant: 'destructive' }); return; }
     if (items.length === 0 || items.some(item => !item.product_id)) { toast({ title: '请添加商品', variant: 'destructive' }); return; }
     if (!logisticsCompanyId) { toast({ title: '请选择物流公司', variant: 'destructive' }); return; }
-    if (!loadingDate) { toast({ title: '请选择装货日期', variant: 'destructive' }); return; }
-    if (!unloadingDate) { toast({ title: '请选择卸货日期', variant: 'destructive' }); return; }
-    // 校验卸货日期不能早于装货日期
-    if (loadingDate && unloadingDate) {
-      const loadDate = new Date(loadingDate);
-      const unloadDate = new Date(unloadingDate);
-      loadDate.setHours(0, 0, 0, 0);
-      unloadDate.setHours(0, 0, 0, 0);
-      if (unloadDate < loadDate) {
-        toast({ title: '日期错误', description: '卸货日期不能早于装货日期', variant: 'destructive' });
-        return;
-      }
-    }
+    const dateLabel = orderType === 'loading' ? '装货日期' : '卸货日期';
+    if (!orderDate) { toast({ title: `请选择${dateLabel}`, variant: 'destructive' }); return; }
     
-    // 校验库存（销售单需要校验，直销不需要）
-    if (orderType === 'sale') {
+    // 校验库存（从仓库装货需要校验，其他不需要）
+    if (orderType === 'loading' && isSourceWarehouse) {
+      // 找出所有批次中最晚的入库日期
+      let latestBatchDate: Date | null = null;
+      let latestBatchInfo: { productName: string; batchNo: string; receivedAt: string } | null = null;
+      
       for (const item of items) {
+        if (!item.product_id) continue;
+        
         const available = getProductAvailableQuantity(item.product_id);
         if (available !== undefined && item.quantity > available) {
           toast({ title: '库存不足', description: `${item.product_name} 可用库存仅 ${available}，需要 ${item.quantity}`, variant: 'destructive' });
           return;
         }
-        // 校验装货日期不能早于批次入库日期
-        if (item.batch_allocations?.[0]?.received_at && loadingDate) {
-          const batchReceivedDate = new Date(item.batch_allocations[0].received_at);
-          const orderLoadingDate = new Date(loadingDate);
-          // 只比较日期部分
-          batchReceivedDate.setHours(0, 0, 0, 0);
-          orderLoadingDate.setHours(0, 0, 0, 0);
-          if (orderLoadingDate < batchReceivedDate) {
-            toast({ 
-              title: '日期错误', 
-              description: `${item.product_name} 的装货日期(${loadingDate})不能早于批次入库日期(${item.batch_allocations[0].received_at?.split('T')[0]})`, 
-              variant: 'destructive' 
-            });
-            return;
+        // 收集所有批次的入库日期，找最晚的那个
+        // 优先使用用户选择的批次
+        if (item.batch_allocations?.[0]?.received_at) {
+          const batchDate = new Date(item.batch_allocations[0].received_at);
+          batchDate.setHours(0, 0, 0, 0);
+          if (!latestBatchDate || batchDate > latestBatchDate) {
+            latestBatchDate = batchDate;
+            latestBatchInfo = {
+              productName: item.product_name || '',
+              batchNo: item.batch_allocations[0].batch_no || '',
+              receivedAt: item.batch_allocations[0].received_at.split('T')[0]
+            };
           }
+        } else {
+          // 如果没有选择批次，从可用批次列表中找最晚的入库日期
+          const batchCacheKey = getBatchCacheKey(item);
+          const availableBatches = productBatches[batchCacheKey] || [];
+          for (const batch of availableBatches) {
+            if (batch.received_at) {
+              const batchDate = new Date(batch.received_at);
+              batchDate.setHours(0, 0, 0, 0);
+              if (!latestBatchDate || batchDate > latestBatchDate) {
+                latestBatchDate = batchDate;
+                latestBatchInfo = {
+                  productName: item.product_name || '',
+                  batchNo: batch.batch_no || '',
+                  receivedAt: batch.received_at.split('T')[0]
+                };
+              }
+            }
+          }
+        }
+      }
+      
+      // 校验装货日期不能早于所有批次中最晚的入库日期
+      if (latestBatchDate && orderDate) {
+        const businessDate = new Date(orderDate);
+        businessDate.setHours(0, 0, 0, 0);
+        if (businessDate < latestBatchDate) {
+          toast({ 
+            title: '日期错误', 
+            description: `装货日期(${orderDate})不能早于批次入库日期。最晚入库的批次是"${latestBatchInfo?.productName}"的${latestBatchInfo?.batchNo}，入库日期为${latestBatchInfo?.receivedAt}`, 
+            variant: 'destructive' 
+          });
+          return;
         }
       }
     }
@@ -547,9 +666,9 @@ export default function NewOrderPage() {
       const data: OrderCreateData = { 
         order_type: orderType, 
         source_id: sourceId, 
-        target_id: targetId, 
-        loading_date: loadingDate || undefined,
-        unloading_date: unloadingDate || undefined,
+        target_id: targetId,
+        logistics_company_id: logisticsCompanyId || undefined,
+        order_date: orderDate || undefined,  // 业务日期（装货单=装货日期，卸货单=卸货日期）
         total_shipping: shippingCost || undefined,
         total_storage_fee: storageFee || undefined,
         other_fee: otherFee || undefined,
@@ -589,9 +708,9 @@ export default function NewOrderPage() {
   };
 
   const formatAmount = (amount: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-  const getTypeLabel = (type: string) => ({ purchase: '采购单', sale: '销售单' }[type] || type);
-  const getSourceLabel = () => ({ purchase: '供应商', sale: '出库仓库' }[orderType] || '来源');
-  const getTargetLabel = () => ({ purchase: '入库仓库', sale: '客户' }[orderType] || '目标');
+  const getTypeLabel = (type: string) => ({ loading: '装货单', unloading: '卸货单' }[type] || type);
+  const getSourceLabel = () => orderType === 'loading' ? '来源' : '在途仓';
+  const getTargetLabel = () => orderType === 'loading' ? '在途仓' : '目标';
 
   if (loading) return <div className="flex justify-center items-center h-screen"><p>加载中...</p></div>;
   const totals = calculateTotals();
@@ -608,8 +727,8 @@ export default function NewOrderPage() {
           <h2 className="text-lg font-semibold text-slate-900 mb-4">业务类型</h2>
           <div className="flex flex-wrap gap-3">
             {[
-              { value: 'purchase', label: '采购', color: 'bg-blue-500', desc: '供应商→仓库' }, 
-              { value: 'sale', label: '销售', color: 'bg-green-500', desc: '仓库→客户' }
+              { value: 'loading', label: '装货单', color: 'bg-blue-500', desc: 'X → 在途仓' }, 
+              { value: 'unloading', label: '卸货单', color: 'bg-green-500', desc: '在途仓 → Y' }
             ].map(type => (
               <button 
                 key={type.value} 
@@ -621,6 +740,9 @@ export default function NewOrderPage() {
               </button>
             ))}
           </div>
+          <p className="text-xs text-slate-500 mt-3">
+            装货单：从供应商/仓库/客户装货发往在途仓 | 卸货单：从在途仓卸货到仓库/客户/供应商
+          </p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6 shadow-sm">
@@ -646,20 +768,20 @@ export default function NewOrderPage() {
           <div className="flex justify-between items-center mb-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">商品明细</h2>
-              {orderType === 'sale' && !sourceId && (
+              {orderType === 'loading' && isSourceWarehouse && !sourceId && (
                 <p className="text-xs text-amber-600 mt-1">请先选择出库仓库</p>
               )}
-              {orderType === 'sale' && sourceId > 0 && (
+              {orderType === 'loading' && isSourceWarehouse && sourceId > 0 && (
                 <p className="text-xs text-slate-500 mt-1">
                   {stocksLoading ? '加载库存中...' : warehouseStocks.length === 0 ? '该仓库暂无库存' : `可选 ${warehouseStocks.length} 种库存商品`}
                 </p>
               )}
             </div>
-            <Button size="sm" onClick={addItem} disabled={orderType === 'sale' && (sourceId === 0 || warehouseStocks.length === 0)}>
+            <Button size="sm" onClick={addItem} disabled={orderType === 'loading' && isSourceWarehouse && (sourceId === 0 || warehouseStocks.length === 0)}>
               <Plus className="w-4 h-4 mr-1" />添加商品
             </Button>
           </div>
-          {items.length === 0 ? <div className="text-center py-8 text-slate-500"><p>请添加商品</p><Button className="mt-2" onClick={addItem} disabled={orderType === 'sale' && (sourceId === 0 || warehouseStocks.length === 0)}><Plus className="w-4 h-4 mr-1" />添加第一个商品</Button></div> : (
+          {items.length === 0 ? <div className="text-center py-8 text-slate-500"><p>请添加商品</p><Button className="mt-2" onClick={addItem} disabled={orderType === 'loading' && isSourceWarehouse && (sourceId === 0 || warehouseStocks.length === 0)}><Plus className="w-4 h-4 mr-1" />添加第一个商品</Button></div> : (
             <div className="space-y-4">
               {items.map((item, index) => (
                 <div key={item._id} className="border border-slate-200 rounded-lg p-4 bg-white">
@@ -722,30 +844,53 @@ export default function NewOrderPage() {
                     </div>
                     <div>
                       <label className="text-xs text-slate-500 block mb-1">
-                        {/* 根据规格类型显示标签 */}
-                        {hasSpec(item)
-                          ? (isSpecBulk(item)
-                              ? `净重 (${getBaseUnit(item)})`  // 散装：显示净重
-                              : `件数 (${getContainerName(item)})`)  // 按件：显示件数
-                          : `数量 (${item.product_unit || '个'})`
-                        } *
+                        {/* 根据规格类型和单位类型显示标签 */}
+                        {(() => {
+                          // 按重量计量的商品，显示"净重"
+                          const showNetWeight = (
+                            (hasSpec(item) && isSpecBulk(item)) || 
+                            (!hasSpec(item) && isWeightBasedUnit(item.product_unit))
+                          );
+                          if (showNetWeight) {
+                            return `净重 (${getBaseUnit(item)})`;
+                          }
+                          // 有规格的商品
+                          if (hasSpec(item)) {
+                            return isSpecBulk(item)
+                              ? `净重 (${getBaseUnit(item)})`
+                              : `件数 (${getContainerName(item)})`;
+                          }
+                          // 从仓库装货，按重量计量
+                          if (orderType === 'loading' && isSourceWarehouse && isWeightBasedUnit(item.product_unit)) {
+                            return `数量 (${item.product_unit || 'kg'})`;
+                          }
+                          // 默认
+                          return `数量 (${item.product_unit || '个'})`;
+                        })()} *
                       </label>
                       <Input 
                         type="number" 
-                        min={isSpecBulk(item) ? "0" : "1"}
-                        step={isSpecBulk(item) ? "0.01" : "1"}
+                        min={isSpecBulk(item) || isWeightBasedUnit(item.product_unit) ? "0" : "1"}
+                        step={isSpecBulk(item) || isWeightBasedUnit(item.product_unit) ? "0.01" : "1"}
                         max={item.available_quantity} 
                         value={item.quantity || ''} 
-                        onChange={e => updateItem(index, 'quantity', e.target.value === '' ? 0 : parseFloat(e.target.value))} 
+                        onChange={e => {
+                          // 如果是按重量计量且需要通过毛重计算，不允许直接修改
+                          const needsGrossWeight = (isSpecBulk(item) || isWeightBasedUnit(item.product_unit));
+                          if (needsGrossWeight) return;
+                          updateItem(index, 'quantity', e.target.value === '' ? 0 : parseFloat(e.target.value));
+                        }} 
                         onBlur={e => { 
-                          const minVal = isSpecBulk(item) ? 0 : 1;
+                          const needsGrossWeight = (isSpecBulk(item) || isWeightBasedUnit(item.product_unit));
+                          if (needsGrossWeight) return;
+                          const minVal = 1;
                           if (!e.target.value || parseFloat(e.target.value) < minVal) {
                             updateItem(index, 'quantity', minVal);
                           }
                         }}
                         onFocus={e => e.target.select()}
-                        className={`${item.available_quantity !== undefined && item.quantity > item.available_quantity ? 'border-red-500' : ''}`}
-                        readOnly={isSpecBulk(item) && !!item.gross_weight}  // 散装且有毛重时只读
+                        className={`${item.available_quantity !== undefined && item.quantity > item.available_quantity ? 'border-red-500' : ''} ${(isSpecBulk(item) || isWeightBasedUnit(item.product_unit)) ? 'bg-slate-100 cursor-not-allowed' : ''}`}
+                        readOnly={isSpecBulk(item) || isWeightBasedUnit(item.product_unit)}
                       />
                       {/* 按件时显示换算重量 */}
                       {hasSpec(item) && !isSpecBulk(item) && item.quantity > 0 && (
@@ -770,20 +915,20 @@ export default function NewOrderPage() {
                     <div><label className="text-xs text-slate-500 block mb-1">小计</label><div className="h-10 flex items-center font-medium text-slate-900">{formatAmount(item.quantity * item.unit_price)}</div></div>
                   </div>
                   
-                  {/* 销售单：批次选择（必选）- 独立行，占满宽度 */}
+                  {/* 装货单从仓库出货：批次选择（必选）- 独立行，占满宽度 */}
                   {/* 同商品不同规格视为不同商品，批次需要按规格匹配 */}
                   {(() => {
-                    // 计算批次缓存键
-                    const batchCacheKey = item.spec_id ? `${item.product_id}_${item.spec_id}` : item.product_id.toString();
+                    // 计算批次缓存键（散装规格不按规格筛选）
+                    const batchCacheKey = getBatchCacheKey(item);
                     const itemBatches = productBatches[batchCacheKey] || [];
                     
-                    if (orderType !== 'sale' || item.product_id <= 0 || itemBatches.length === 0) return null;
+                    // 只有装货单且来源是仓库时才需要选批次
+                    if (!(orderType === 'loading' && isSourceWarehouse) || item.product_id <= 0 || itemBatches.length === 0) return null;
                     
                     return (
                     <div className="mt-3">
                       <label className="text-xs font-medium text-slate-600 block mb-1">
                         📦 选择出货批次 *
-                        {item.spec_name && <span className="ml-1 text-purple-600">({item.spec_name})</span>}
                       </label>
                       <Select 
                         value={item.batch_allocations?.[0]?.batch_id?.toString() || ''} 
@@ -802,12 +947,12 @@ export default function NewOrderPage() {
                         }}
                       >
                         <SelectTrigger className="w-full h-9 text-sm">
-                          <SelectValue placeholder="请选择批次（先进先出）" />
+                          <SelectValue placeholder="请选择出货批次" />
                         </SelectTrigger>
                         <SelectContent className="w-[var(--radix-select-trigger-width)]">
-                          {itemBatches.map((batch, idx) => (
+                          {itemBatches.map((batch) => (
                             <SelectItem key={batch.id} value={batch.id.toString()}>
-                              {idx === 0 ? '🔸 ' : ''}{batch.batch_no} 
+                              {batch.batch_no} 
                               {batch.spec_name && <span className="text-purple-500 ml-1">[{batch.spec_name}]</span>}
                               {' | '}{batch.received_at ? new Date(batch.received_at).toLocaleDateString('zh-CN') : '-'} | 库存:{Number(batch.available_quantity).toLocaleString()}{item.product_unit} | ¥{Number(batch.cost_price).toFixed(2)}
                             </SelectItem>
@@ -824,18 +969,6 @@ export default function NewOrderPage() {
                               入库 {item.batch_allocations[0].received_at ? new Date(item.batch_allocations[0].received_at).toLocaleDateString('zh-CN') : '-'}
                             </span>
                           </div>
-                          {/* 日期校验警告 */}
-                          {loadingDate && item.batch_allocations[0].received_at && (() => {
-                            const batchDate = new Date(item.batch_allocations[0].received_at);
-                            const loadDate = new Date(loadingDate);
-                            batchDate.setHours(0, 0, 0, 0);
-                            loadDate.setHours(0, 0, 0, 0);
-                            return loadDate < batchDate;
-                          })() && (
-                            <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700">
-                              🚫 <strong>日期错误：</strong>装货日期({loadingDate})不能早于批次入库日期({item.batch_allocations[0].received_at?.split('T')[0]})
-                            </div>
-                          )}
                         </>
                       )}
                       {!item.batch_allocations?.[0] && (
@@ -846,9 +979,10 @@ export default function NewOrderPage() {
                   })()}
                   {/* 批次加载中或无批次 */}
                   {(() => {
-                    const batchCacheKey = item.spec_id ? `${item.product_id}_${item.spec_id}` : item.product_id.toString();
+                    const batchCacheKey = getBatchCacheKey(item);
                     const itemBatches = productBatches[batchCacheKey];
-                    if (orderType !== 'sale' || item.product_id <= 0 || !itemBatches || itemBatches.length > 0) return null;
+                    // 只有装货单且来源是仓库时才显示无批次警告
+                    if (!(orderType === 'loading' && isSourceWarehouse) || item.product_id <= 0 || !itemBatches || itemBatches.length > 0) return null;
                     return (
                       <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200 text-sm text-amber-700">
                         ⚠️ 该商品{item.spec_name ? `【${item.spec_name}】规格` : ''}暂无可用库存批次
@@ -856,8 +990,8 @@ export default function NewOrderPage() {
                     );
                   })()}
                   
-                  {/* 毛重扣重区域：散装规格 或 无规格的重量商品（采购/销售通用） */}
-                  {['purchase', 'sale'].includes(orderType) && item.product_id > 0 && (
+                  {/* 毛重扣重区域：散装规格 或 无规格的重量商品 */}
+                  {['purchase', 'sale', 'loading', 'unloading'].includes(orderType) && item.product_id > 0 && (
                     (hasSpec(item) && isSpecBulk(item)) || (!hasSpec(item) && isWeightBasedUnit(item.product_unit))
                   ) && (
                     <div className="mt-3 pt-3 border-t border-slate-200/50 bg-amber-50/50 -mx-4 px-4 pb-3 rounded-b-lg">
@@ -1022,16 +1156,16 @@ export default function NewOrderPage() {
             </div>
           </div>
           
-          {/* 装卸货日期 */}
+          {/* 业务日期 */}
           <div className="mt-4 pt-4 border-t border-slate-200/50">
             <h3 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-amber-600" />
-              装卸货日期
+              业务日期
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="group">
                 <label className="text-xs font-medium text-slate-600 block mb-1.5">
-                  装货日期 <span className="text-amber-600">*</span>
+                  {orderType === 'loading' ? '装货日期' : '卸货日期'} <span className="text-amber-600">*</span>
                 </label>
                 <div className="relative">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -1039,8 +1173,8 @@ export default function NewOrderPage() {
                   </div>
                   <input 
                     type="date"
-                    value={loadingDate} 
-                    onChange={e => setLoadingDate(e.target.value)}
+                    value={orderDate} 
+                    onChange={e => setOrderDate(e.target.value)}
                     required
                     className="w-full h-10 pl-10 pr-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-700
                       shadow-sm transition-all duration-200
@@ -1056,50 +1190,28 @@ export default function NewOrderPage() {
                     </svg>
                   </div>
                 </div>
-              </div>
-              <div className="group">
-                <label className="text-xs font-medium text-slate-600 block mb-1.5">
-                  卸货日期 <span className="text-amber-600">*</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                    <Calendar className="w-4 h-4 text-slate-400 group-focus-within:text-amber-500 transition-colors" />
-                  </div>
-                  <input 
-                    type="date"
-                    value={unloadingDate} 
-                    onChange={e => setUnloadingDate(e.target.value)}
-                    required
-                    className={`w-full h-10 pl-10 pr-3 rounded-lg border bg-white text-sm text-slate-700
-                      shadow-sm transition-all duration-200
-                      [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute 
-                      [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full 
-                      [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer
-                      ${loadingDate && unloadingDate && new Date(unloadingDate) < new Date(loadingDate) 
-                        ? 'border-red-400 focus:border-red-500 focus:ring-red-100' 
-                        : 'border-slate-200 hover:border-amber-300 hover:shadow focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100'}`}
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  {orderType === 'loading' ? '货物从来源发出的日期' : '货物送达目标的日期'}
+                </p>
               </div>
             </div>
-            {/* 日期校验警告 */}
-            {loadingDate && unloadingDate && new Date(unloadingDate) < new Date(loadingDate) && (
+            {/* 从仓库装货：装货日期不能早于最晚批次入库日期 */}
+            {orderType === 'loading' && isSourceWarehouse && orderDate && latestBatchReceivedDate && (() => {
+              const businessDate = new Date(orderDate);
+              businessDate.setHours(0, 0, 0, 0);
+              return businessDate < latestBatchReceivedDate.date;
+            })() && (
               <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded-lg text-xs text-red-700">
-                🚫 <strong>日期错误：</strong>卸货日期不能早于装货日期
+                🚫 <strong>日期错误：</strong>装货日期({orderDate})不能早于批次入库日期。最晚入库的批次是"{latestBatchReceivedDate.productName}"的{latestBatchReceivedDate.batchNo}，入库日期为{latestBatchReceivedDate.receivedAt}
               </div>
             )}
           </div>
           
-          {/* 采购单：运费和冷藏费 */}
-          {orderType === 'purchase' && (
-            <div className="mt-4 pt-4 border-t border-slate-200/50">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-slate-700">运费与冷藏费</h3>
+          {/* 运费与冷藏费 - 统一区域 */}
+          <div className="mt-4 pt-4 border-t border-slate-200/50">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-slate-700">运费与冷藏费</h3>
+              {(isSourceWarehouse || isTargetWarehouse) && (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input 
                     type="checkbox" 
@@ -1109,104 +1221,63 @@ export default function NewOrderPage() {
                   />
                   <span className="text-xs text-slate-600">计算冷藏费</span>
                 </label>
+              )}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">运费（元）</label>
+                <Input 
+                  type="number" 
+                  step="0.01" 
+                  min="0"
+                  value={shippingCost || ''} 
+                  onChange={e => setShippingCost(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                  placeholder="运费"
+                />
+                <p className="text-xs text-slate-400 mt-1">💡 应付物流公司</p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">总毛重（参考）</label>
-                  <div className="h-10 flex items-center text-sm font-medium text-slate-900 bg-gray-50 rounded px-3">
-                    {totalGrossWeight > 0 ? `${totalGrossWeight.toLocaleString()} kg` : '-'}
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
+                {(isSourceWarehouse || isTargetWarehouse) ? (
+                  <>
+                    <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+                      {calculateStorageFee 
+                        ? (items.length > 0 ? `预估 ¥${storageFee.toFixed(2)}` : '添加商品后计算')
+                        : '不计算'
+                      }
+                    </div>
+                    {calculateStorageFee && (
+                      <p className="text-xs text-slate-400 mt-1">
+                        💡 {orderType === 'loading' && isSourceWarehouse ? '出库费+存储费' : '入库费：每吨15元'}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="h-10 flex items-center text-sm text-slate-400 bg-slate-50 rounded px-3 border border-slate-200">
+                    无需计算
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">运费（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={shippingCost || ''} 
-                    onChange={e => setShippingCost(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="物流公司账单金额"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">💡 应付物流公司</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
-                  <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-green-600 bg-green-50 border-green-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
-                    {calculateStorageFee ? `¥${storageFee.toFixed(2)}` : '不计算'}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">💡 每吨15元，应付冷库</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">其他费用（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={otherFee || ''} 
-                    onChange={e => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="杂费支出"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">💡 装卸费、过磅费等</p>
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">其他费用（元）</label>
+                <Input 
+                  type="number" 
+                  step="0.01" 
+                  min="0"
+                  value={otherFee || ''} 
+                  onChange={e => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                  placeholder="杂费支出"
+                />
+                <p className="text-xs text-slate-400 mt-1">💡 装卸费、过磅费等</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">总毛重（参考）</label>
+                <div className="h-10 flex items-center text-sm font-medium text-slate-900 bg-gray-50 rounded px-3">
+                  {totalGrossWeight > 0 ? `${totalGrossWeight.toLocaleString()} kg` : '-'}
                 </div>
               </div>
             </div>
-          )}
-          
-          {/* 销售单：运费和冷藏费 */}
-          {orderType === 'sale' && (
-            <div className="mt-4 pt-4 border-t border-slate-200/50">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-slate-700">运费与冷藏费</h3>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={calculateStorageFee} 
-                    onChange={e => setCalculateStorageFee(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-xs text-slate-600">计算冷藏费</span>
-                </label>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">运费（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={shippingCost || ''} 
-                    onChange={e => setShippingCost(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="送货运费"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">💡 应付物流公司（如有）</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">冷藏费（元）</label>
-                  <div className={`h-10 flex items-center text-sm font-medium rounded px-3 border ${calculateStorageFee ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
-                    {calculateStorageFee 
-                      ? (items.length > 0 ? `预估 ¥${storageFee.toFixed(2)}` : '添加商品后计算')
-                      : '不计算'
-                    }
-                  </div>
-                  {calculateStorageFee && (
-                    <p className="text-xs text-slate-400 mt-1">💡 每吨15元 + 存储费</p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">其他费用（元）</label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0"
-                    value={otherFee || ''} 
-                    onChange={e => setOtherFee(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    placeholder="杂费支出"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">💡 装卸费、过磅费等</p>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
           
         </div>
 

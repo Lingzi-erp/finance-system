@@ -234,58 +234,71 @@ async def init_demo_data(
         db.add(p3)
         await db.flush()
         
-        # ========== 7. 创建采购单 ==========
+        # ========== 6.5. 获取在途仓 ==========
+        transit_result = await db.execute(
+            select(Entity).where(Entity.code == "SYS_TRANSIT")
+        )
+        transit = transit_result.scalar_one_or_none()
+        if not transit:
+            # 如果不存在，创建在途仓
+            transit = Entity(
+                name="在途仓", code="SYS_TRANSIT", entity_type="transit",
+                is_system=True, is_active=True, created_by=admin_id
+            )
+            db.add(transit)
+            await db.flush()
+        
+        # ========== 7. 创建装货单（供应商→在途仓）==========
         po1 = BusinessOrder(
-            order_no=f"PO{today.strftime('%Y%m%d')}001",
-            order_type="purchase",
+            order_no=f"ZH{today.strftime('%Y%m%d')}001",
+            order_type="loading",
             status="completed",
             source_id=sp1.id,
-            target_id=wh1.id,
+            target_id=transit.id,
             order_date=today - timedelta(days=3),
-            loading_date=today - timedelta(days=3),
-            unloading_date=today - timedelta(days=3),
             completed_at=today - timedelta(days=3),
             total_quantity=100,
             total_amount=Decimal("2500"),
-            total_shipping=Decimal("100"),
-            total_storage_fee=Decimal("1.5"),  # 0.1吨 × 15元/吨 = 1.5元
-            final_amount=Decimal("2601.5"),
-            calculate_storage_fee=True,
-            notes="[演示数据] 演示采购单 - 可安全删除",
+            total_shipping=Decimal("0"),  # 装货单不填运费
+            total_storage_fee=Decimal("0"),  # 供应商→在途仓无冷藏费
+            final_amount=Decimal("2500"),
+            calculate_storage_fee=False,
+            notes="[演示数据] 演示装货单 - 可安全删除",
             created_by=admin_id
         )
         db.add(po1)
         await db.flush()
         
-        # 采购单明细（关联物流公司用于运费账单）
+        # 装货单明细（关联物流公司）
         poi1 = OrderItem(
             order_id=po1.id, product_id=p1.id,
             quantity=100, unit_price=Decimal("25"),
             amount=Decimal("2500"), subtotal=Decimal("2500"),
             logistics_company_id=lg1.id,
-            shipping_cost=Decimal("100")
+            shipping_cost=Decimal("0")
         )
         db.add(poi1)
         
-        # 采购流程
+        # 装货流程
         pof1 = OrderFlow(
             order_id=po1.id, flow_type="created", flow_status="completed",
-            description="创建采购单", operator_id=admin_id, operated_at=today - timedelta(days=3)
+            description="创建装货单", operator_id=admin_id, operated_at=today - timedelta(days=3)
         )
         pof2 = OrderFlow(
             order_id=po1.id, flow_type="completed", flow_status="completed",
-            description="采购完成", operator_id=admin_id, operated_at=today - timedelta(days=3)
+            description="装货完成", operator_id=admin_id, operated_at=today - timedelta(days=3)
         )
         db.add(pof1)
         db.add(pof2)
         await db.flush()
         
-        # ========== 8. 创建库存和批次 ==========
-        stock1 = Stock(
-            warehouse_id=wh1.id, product_id=p1.id,
+        # ========== 8. 创建在途仓库存和批次 ==========
+        # 装货单完成后，货物进入在途仓
+        stock_transit = Stock(
+            warehouse_id=transit.id, product_id=p1.id,
             quantity=Decimal("100"), reserved_quantity=Decimal("0")
         )
-        db.add(stock1)
+        db.add(stock_transit)
         await db.flush()
         
         # 使用动态生成的批次号（避免与用户数据冲突）
@@ -295,7 +308,7 @@ async def init_demo_data(
         batch1 = StockBatch(
             batch_no=demo_batch_no,
             product_id=p1.id,
-            storage_entity_id=wh1.id,
+            storage_entity_id=transit.id,  # 在途仓
             source_entity_id=sp1.id,
             source_order_id=po1.id,
             initial_quantity=Decimal("100"),
@@ -304,39 +317,111 @@ async def init_demo_data(
             cost_amount=Decimal("2500"),
             received_at=today - timedelta(days=3),
             status="active",
-            notes="[演示数据] 演示批次 - 可安全删除",  # 明确标识
+            notes="[演示数据] 演示批次 - 可安全删除",
             created_by=admin_id
         )
         db.add(batch1)
         
         flow1 = StockFlow(
-            stock_id=stock1.id, order_id=po1.id,
+            stock_id=stock_transit.id, order_id=po1.id,
             flow_type="in", quantity_change=Decimal("100"),
             quantity_before=Decimal("0"), quantity_after=Decimal("100"),
-            reason="采购入库", operator_id=admin_id, operated_at=today - timedelta(days=3)
+            reason="装货入在途仓", operator_id=admin_id, operated_at=today - timedelta(days=3)
         )
         db.add(flow1)
         await db.flush()
         
-        # ========== 9. 创建销售单 ==========
-        # 冷藏费计算：0.03吨 × 15元/吨（出库费）+ 0.03吨 × 2天 × 1.5元/吨/天 = 0.45 + 0.09 = 0.54元
+        # ========== 8.5. 创建卸货单（在途仓→仓库）==========
+        unload1 = BusinessOrder(
+            order_no=f"XH{today.strftime('%Y%m%d')}001",
+            order_type="unloading",
+            status="completed",
+            source_id=transit.id,
+            target_id=wh1.id,
+            order_date=today - timedelta(days=3),
+            completed_at=today - timedelta(days=3),
+            total_quantity=100,
+            total_amount=Decimal("2500"),
+            total_shipping=Decimal("100"),  # 卸货单填运费
+            total_storage_fee=Decimal("1.5"),  # 入库冷藏费：0.1吨 × 15元/吨
+            final_amount=Decimal("2601.5"),
+            calculate_storage_fee=True,
+            notes="[演示数据] 演示卸货单（入库）- 可安全删除",
+            created_by=admin_id
+        )
+        db.add(unload1)
+        await db.flush()
+        
+        # 卸货单明细
+        unload_item1 = OrderItem(
+            order_id=unload1.id, product_id=p1.id,
+            quantity=100, unit_price=Decimal("25"),
+            amount=Decimal("2500"), subtotal=Decimal("2500"),
+            logistics_company_id=lg1.id,
+            shipping_cost=Decimal("100")
+        )
+        db.add(unload_item1)
+        
+        # 卸货流程
+        unload_flow1 = OrderFlow(
+            order_id=unload1.id, flow_type="created", flow_status="completed",
+            description="创建卸货单", operator_id=admin_id, operated_at=today - timedelta(days=3)
+        )
+        unload_flow2 = OrderFlow(
+            order_id=unload1.id, flow_type="completed", flow_status="completed",
+            description="卸货完成", operator_id=admin_id, operated_at=today - timedelta(days=3)
+        )
+        db.add(unload_flow1)
+        db.add(unload_flow2)
+        await db.flush()
+        
+        # 从在途仓出库
+        stock_transit.quantity = Decimal("0")
+        flow_out_transit = StockFlow(
+            stock_id=stock_transit.id, order_id=unload1.id,
+            flow_type="out", quantity_change=Decimal("-100"),
+            quantity_before=Decimal("100"), quantity_after=Decimal("0"),
+            reason="卸货出在途仓", operator_id=admin_id, operated_at=today - timedelta(days=3)
+        )
+        db.add(flow_out_transit)
+        
+        # 入库到仓库
+        stock1 = Stock(
+            warehouse_id=wh1.id, product_id=p1.id,
+            quantity=Decimal("100"), reserved_quantity=Decimal("0")
+        )
+        db.add(stock1)
+        await db.flush()
+        
+        flow_in_wh = StockFlow(
+            stock_id=stock1.id, order_id=unload1.id,
+            flow_type="in", quantity_change=Decimal("100"),
+            quantity_before=Decimal("0"), quantity_after=Decimal("100"),
+            reason="卸货入仓库", operator_id=admin_id, operated_at=today - timedelta(days=3)
+        )
+        db.add(flow_in_wh)
+        
+        # 更新批次存储位置
+        batch1.storage_entity_id = wh1.id
+        await db.flush()
+        
+        # ========== 9. 创建销售装货单（仓库→在途仓）==========
+        # 冷藏费计算：0.03吨 × 15元/吨 + 0.03吨 × 2天 × 1.5元/吨/天 = 0.45 + 0.09 = 0.54元
         so1 = BusinessOrder(
-            order_no=f"SO{today.strftime('%Y%m%d')}001",
-            order_type="sale",
+            order_no=f"ZH{today.strftime('%Y%m%d')}002",
+            order_type="loading",
             status="completed",
             source_id=wh1.id,
-            target_id=cu1.id,
+            target_id=transit.id,
             order_date=today - timedelta(days=1),
-            loading_date=today - timedelta(days=1),
-            unloading_date=today - timedelta(days=1),
             completed_at=today - timedelta(days=1),
             total_quantity=30,
             total_amount=Decimal("1050"),
-            total_shipping=Decimal("50"),
-            total_storage_fee=Decimal("0.54"),
-            final_amount=Decimal("1100.54"),
+            total_shipping=Decimal("0"),  # 装货单不填运费
+            total_storage_fee=Decimal("0.54"),  # 从仓库装货需计算冷藏费
+            final_amount=Decimal("1050.54"),
             calculate_storage_fee=True,
-            notes="[演示数据] 演示销售单 - 可安全删除",
+            notes="[演示数据] 演示装货单（出库）- 可安全删除",
             created_by=admin_id
         )
         db.add(so1)
@@ -346,11 +431,11 @@ async def init_demo_data(
             order_id=so1.id, product_id=p1.id,
             quantity=30, unit_price=Decimal("35"),
             amount=Decimal("1050"), subtotal=Decimal("1050"),
-            cost_price=Decimal("25"),  # 成本单价（采购价）
-            cost_amount=Decimal("750"),  # 成本金额 = 30 × 25
-            profit=Decimal("249.46"),  # 利润 = 1050 - 750 - 50(运费) - 0.54(冷藏费)
+            cost_price=Decimal("25"),
+            cost_amount=Decimal("750"),
+            profit=Decimal("249.46"),
             logistics_company_id=lg1.id,
-            shipping_cost=Decimal("50")
+            shipping_cost=Decimal("0")
         )
         db.add(soi1)
         await db.flush()
@@ -364,20 +449,20 @@ async def init_demo_data(
             cost_amount=Decimal("750")
         )
         db.add(oib1)
-        await db.flush()  # 确保 OrderItemBatch 被正确保存
+        await db.flush()
         
         sof1 = OrderFlow(
             order_id=so1.id, flow_type="created", flow_status="completed",
-            description="创建销售单", operator_id=admin_id, operated_at=today - timedelta(days=1)
+            description="创建装货单", operator_id=admin_id, operated_at=today - timedelta(days=1)
         )
         sof2 = OrderFlow(
             order_id=so1.id, flow_type="completed", flow_status="completed",
-            description="销售完成", operator_id=admin_id, operated_at=today - timedelta(days=1)
+            description="装货完成", operator_id=admin_id, operated_at=today - timedelta(days=1)
         )
         db.add(sof1)
         db.add(sof2)
         
-        # 更新库存
+        # 从仓库出库到在途仓
         stock1.quantity = Decimal("70")
         batch1.current_quantity = Decimal("70")
         
@@ -385,73 +470,109 @@ async def init_demo_data(
             stock_id=stock1.id, order_id=so1.id,
             flow_type="out", quantity_change=Decimal("-30"),
             quantity_before=Decimal("100"), quantity_after=Decimal("70"),
-            reason="销售出库", operator_id=admin_id, operated_at=today - timedelta(days=1)
+            reason="装货出仓库", operator_id=admin_id, operated_at=today - timedelta(days=1)
         )
         db.add(flow2)
         await db.flush()
         
-        # ========== 10. 创建往来账款（货款、运费、冷藏费分开生成）==========
-        # --- 采购单账款 ---
-        # 1. 货款应付给供应商
-        po1_goods = po1.total_amount  # 2500
+        # ========== 9.5. 创建销售卸货单（在途仓→客户）==========
+        so2 = BusinessOrder(
+            order_no=f"XH{today.strftime('%Y%m%d')}002",
+            order_type="unloading",
+            status="completed",
+            source_id=transit.id,
+            target_id=cu1.id,
+            order_date=today - timedelta(days=1),
+            completed_at=today - timedelta(days=1),
+            total_quantity=30,
+            total_amount=Decimal("1050"),
+            total_shipping=Decimal("50"),  # 卸货单填运费
+            total_storage_fee=Decimal("0"),  # 客户不是仓库，无冷藏费
+            final_amount=Decimal("1100"),
+            calculate_storage_fee=False,
+            notes="[演示数据] 演示卸货单（销售）- 可安全删除",
+            created_by=admin_id
+        )
+        db.add(so2)
+        await db.flush()
+        
+        soi2 = OrderItem(
+            order_id=so2.id, product_id=p1.id,
+            quantity=30, unit_price=Decimal("35"),
+            amount=Decimal("1050"), subtotal=Decimal("1050"),
+            logistics_company_id=lg1.id,
+            shipping_cost=Decimal("50")
+        )
+        db.add(soi2)
+        
+        sof3 = OrderFlow(
+            order_id=so2.id, flow_type="created", flow_status="completed",
+            description="创建卸货单", operator_id=admin_id, operated_at=today - timedelta(days=1)
+        )
+        sof4 = OrderFlow(
+            order_id=so2.id, flow_type="completed", flow_status="completed",
+            description="卸货完成", operator_id=admin_id, operated_at=today - timedelta(days=1)
+        )
+        db.add(sof3)
+        db.add(sof4)
+        await db.flush()
+        
+        # ========== 10. 创建往来账款（新版X-D-Y模式）==========
+        # --- 装货单1（供应商→在途仓）账款 ---
+        # 货款应付给供应商
         db.add(AccountBalance(
             entity_id=sp1.id, order_id=po1.id,
-            balance_type="payable", amount=po1_goods,
-            paid_amount=Decimal("0"), balance=po1_goods,
-            status="pending", notes="采购货款", created_by=admin_id
+            balance_type="payable", amount=po1.total_amount,
+            paid_amount=Decimal("0"), balance=po1.total_amount,
+            status="pending", notes="装货货款(供应商)", created_by=admin_id
         ))
         
-        # 2. 运费应付给物流公司
-        po1_shipping = po1.total_shipping  # 100
+        # --- 卸货单1（在途仓→仓库）账款 ---
+        # 运费应付给物流公司
         db.add(AccountBalance(
-            entity_id=lg1.id, order_id=po1.id,
-            balance_type="payable", amount=po1_shipping,
-            paid_amount=Decimal("0"), balance=po1_shipping,
-            status="pending", notes="采购运费", created_by=admin_id
+            entity_id=lg1.id, order_id=unload1.id,
+            balance_type="payable", amount=unload1.total_shipping,
+            paid_amount=Decimal("0"), balance=unload1.total_shipping,
+            status="pending", notes="卸货运费", created_by=admin_id
         ))
-        
-        # 3. 冷藏费应付给仓库
-        po1_storage = po1.total_storage_fee  # 15
+        # 冷藏费应付给仓库
         db.add(AccountBalance(
-            entity_id=wh1.id, order_id=po1.id,
-            balance_type="payable", amount=po1_storage,
-            paid_amount=Decimal("0"), balance=po1_storage,
+            entity_id=wh1.id, order_id=unload1.id,
+            balance_type="payable", amount=unload1.total_storage_fee,
+            paid_amount=Decimal("0"), balance=unload1.total_storage_fee,
             status="pending", notes="入库冷藏费", created_by=admin_id
         ))
         
-        # --- 销售单账款 ---
-        # 1. 货款应收自客户
-        so1_goods = so1.total_amount  # 1050
-        db.add(AccountBalance(
-            entity_id=cu1.id, order_id=so1.id,
-            balance_type="receivable", amount=so1_goods,
-            paid_amount=Decimal("0"), balance=so1_goods,
-            status="pending", notes="销售货款", created_by=admin_id
-        ))
-        
-        # 2. 运费应付给物流公司
-        so1_shipping = so1.total_shipping  # 50
-        db.add(AccountBalance(
-            entity_id=lg1.id, order_id=so1.id,
-            balance_type="payable", amount=so1_shipping,
-            paid_amount=Decimal("0"), balance=so1_shipping,
-            status="pending", notes="销售运费", created_by=admin_id
-        ))
-        
-        # 3. 冷藏费应付给仓库
-        so1_storage = so1.total_storage_fee  # 15.09
+        # --- 装货单2（仓库→在途仓）账款 ---
+        # 冷藏费应付给仓库
         db.add(AccountBalance(
             entity_id=wh1.id, order_id=so1.id,
-            balance_type="payable", amount=so1_storage,
-            paid_amount=Decimal("0"), balance=so1_storage,
+            balance_type="payable", amount=so1.total_storage_fee,
+            paid_amount=Decimal("0"), balance=so1.total_storage_fee,
             status="pending", notes="出库冷藏费", created_by=admin_id
         ))
         
+        # --- 卸货单2（在途仓→客户）账款 ---
+        # 货款应收自客户
+        db.add(AccountBalance(
+            entity_id=cu1.id, order_id=so2.id,
+            balance_type="receivable", amount=so2.total_amount,
+            paid_amount=Decimal("0"), balance=so2.total_amount,
+            status="pending", notes="卸货货款(客户)", created_by=admin_id
+        ))
+        # 运费应付给物流公司
+        db.add(AccountBalance(
+            entity_id=lg1.id, order_id=so2.id,
+            balance_type="payable", amount=so2.total_shipping,
+            paid_amount=Decimal("0"), balance=so2.total_shipping,
+            status="pending", notes="卸货运费", created_by=admin_id
+        ))
+        
         # 更新实体余额
-        sp1.current_balance = -po1_goods  # 供应商：应付货款
-        cu1.current_balance = so1_goods   # 客户：应收货款
-        lg1.current_balance = -(po1_shipping + so1_shipping)  # 物流：应付运费
-        wh1.current_balance = -(po1_storage + so1_storage)    # 仓库：应付冷藏费
+        sp1.current_balance = -po1.total_amount  # 供应商：应付货款
+        cu1.current_balance = so2.total_amount   # 客户：应收货款
+        lg1.current_balance = -(unload1.total_shipping + so2.total_shipping)  # 物流：应付运费
+        wh1.current_balance = -(unload1.total_storage_fee + so1.total_storage_fee)  # 仓库：应付冷藏费
         
         await db.commit()
         
@@ -463,208 +584,16 @@ async def init_demo_data(
                 "customers": 2,
                 "warehouses": 1,
                 "logistics": 1,
+                "transit": 1,
                 "products": 3,
-                "orders": 2,
-                "accounts": 6  # 货款2 + 运费2 + 冷藏费2
+                "orders": 4,  # 2个装货单 + 2个卸货单
+                "accounts": 6
             }
         }
         
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"初始化失败: {str(e)}")
-
-
-@router.post("/recalculate-stocks")
-async def recalculate_stocks(
-    *,
-    db: AsyncSession = Depends(get_db),
-    confirm: bool = Query(False, description="确认执行")
-) -> Any:
-    """根据业务单重新计算库存"""
-    if not confirm:
-        return {
-            "preview": True,
-            "message": "预览模式",
-            "tip": "添加 ?confirm=true 参数确认执行"
-        }
-    
-    # 清除库存数据
-    await db.execute(delete(StockFlow))
-    await db.execute(delete(Stock))
-    await db.flush()
-    
-    # 获取已完成订单
-    result = await db.execute(
-        select(BusinessOrder).where(
-            BusinessOrder.status == "completed",
-            BusinessOrder.order_type.in_(["purchase", "sale", "transfer", "return_in", "return_out"])
-        ).order_by(BusinessOrder.order_date)
-    )
-    orders = result.scalars().all()
-    
-    stock_map: Dict[tuple, Stock] = {}
-    
-    async def get_stock(wh_id: int, prod_id: int) -> Stock:
-        key = (wh_id, prod_id)
-        if key not in stock_map:
-            s = Stock(warehouse_id=wh_id, product_id=prod_id, quantity=Decimal("0"), reserved_quantity=Decimal("0"))
-            db.add(s)
-            await db.flush()
-            stock_map[key] = s
-        return stock_map[key]
-    
-    for order in orders:
-        src_wh = order.source_id if order.source_entity and "warehouse" in (order.source_entity.entity_type or "") else None
-        tgt_wh = order.target_id if order.target_entity and "warehouse" in (order.target_entity.entity_type or "") else None
-        
-        items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-        
-        for item in items:
-            qty = Decimal(str(item.quantity or 0))
-            
-            if order.order_type == "purchase" and tgt_wh:
-                s = await get_stock(tgt_wh, item.product_id)
-                old = s.quantity
-                s.quantity += qty
-                db.add(StockFlow(stock_id=s.id, order_id=order.id, flow_type="in", quantity_change=qty, quantity_before=old, quantity_after=s.quantity, reason=order.order_no, operator_id=1, operated_at=order.order_date))
-            
-            elif order.order_type == "sale" and src_wh:
-                s = await get_stock(src_wh, item.product_id)
-                old = s.quantity
-                s.quantity -= qty
-                db.add(StockFlow(stock_id=s.id, order_id=order.id, flow_type="out", quantity_change=-qty, quantity_before=old, quantity_after=s.quantity, reason=order.order_no, operator_id=1, operated_at=order.order_date))
-            
-            elif order.order_type == "transfer":
-                if src_wh:
-                    s = await get_stock(src_wh, item.product_id)
-                    old = s.quantity
-                    s.quantity -= qty
-                    db.add(StockFlow(stock_id=s.id, order_id=order.id, flow_type="out", quantity_change=-qty, quantity_before=old, quantity_after=s.quantity, reason=order.order_no, operator_id=1, operated_at=order.order_date))
-                if tgt_wh:
-                    s = await get_stock(tgt_wh, item.product_id)
-                    old = s.quantity
-                    s.quantity += qty
-                    db.add(StockFlow(stock_id=s.id, order_id=order.id, flow_type="in", quantity_change=qty, quantity_before=old, quantity_after=s.quantity, reason=order.order_no, operator_id=1, operated_at=order.order_date))
-    
-    await db.commit()
-    return {"success": True, "message": "库存重算完成", "orders": len(orders), "stocks": len(stock_map)}
-
-
-@router.post("/recalculate-accounts")
-async def recalculate_accounts(
-    *,
-    db: AsyncSession = Depends(get_db),
-    confirm: bool = Query(False, description="确认执行")
-) -> Any:
-    """
-    根据业务单重新计算账款
-    
-    按照正常业务逻辑，货款、运费、冷藏费分开生成账单：
-    - 货款 → 供应商/客户
-    - 运费 → 物流公司
-    - 冷藏费 → 仓库
-    """
-    # 检查收付款
-    payments = (await db.execute(select(PaymentRecord))).scalars().all()
-    if payments:
-        raise HTTPException(status_code=400, detail=f"有 {len(payments)} 条收付款记录，请先清理")
-    
-    if not confirm:
-        return {
-            "preview": True,
-            "message": "预览模式 - 将重新生成所有往来账款",
-            "tip": "添加 ?confirm=true 参数确认执行",
-            "warning": "此操作会删除所有账款记录并重新生成"
-        }
-    
-    # 清空账款和实体余额
-    await db.execute(delete(AccountBalance))
-    await db.execute(text("UPDATE v3_entities SET current_balance = 0"))
-    await db.flush()
-    
-    # 获取所有已完成订单（按业务日期排序）
-    result = await db.execute(
-        select(BusinessOrder)
-        .options(selectinload(BusinessOrder.items))
-        .where(
-            BusinessOrder.status == "completed",
-            BusinessOrder.order_type.in_(["purchase", "sale", "return_in", "return_out"])
-        ).order_by(BusinessOrder.order_date)
-    )
-    orders = result.scalars().all()
-    
-    account_count = 0
-    entity_balances: Dict[int, Decimal] = {}  # 实体ID -> 余额变化
-    
-    async def add_account(entity_id: int, order_id: int, balance_type: str, amount: Decimal, notes: str):
-        nonlocal account_count
-        if amount <= Decimal("0"):
-            return
-        db.add(AccountBalance(
-            entity_id=entity_id, order_id=order_id,
-            balance_type=balance_type, amount=amount,
-            paid_amount=Decimal("0"), balance=amount,
-            status="pending", notes=notes, created_by=1
-        ))
-        # 累计实体余额变化
-        delta = amount if balance_type == "receivable" else -amount
-        entity_balances[entity_id] = entity_balances.get(entity_id, Decimal("0")) + delta
-        account_count += 1
-    
-    for order in orders:
-        goods_amount = order.total_amount or Decimal("0")
-        shipping_amount = order.total_shipping or Decimal("0")
-        storage_fee = order.total_storage_fee or Decimal("0")
-        
-        # 获取物流公司ID（从订单明细）
-        logistics_company_id = None
-        for item in order.items:
-            if item.logistics_company_id:
-                logistics_company_id = item.logistics_company_id
-                break
-        
-        if order.order_type == "sale":
-            # 销售：货款应收自客户
-            await add_account(order.target_id, order.id, "receivable", goods_amount, f"销售货款")
-            # 运费应付给物流公司
-            if logistics_company_id:
-                await add_account(logistics_company_id, order.id, "payable", shipping_amount, f"销售运费")
-            # 冷藏费应付给仓库（来源方）
-            await add_account(order.source_id, order.id, "payable", storage_fee, f"出库冷藏费")
-            
-        elif order.order_type == "purchase":
-            # 采购：货款应付给供应商
-            await add_account(order.source_id, order.id, "payable", goods_amount, f"采购货款")
-            # 运费应付给物流公司
-            if logistics_company_id:
-                await add_account(logistics_company_id, order.id, "payable", shipping_amount, f"采购运费")
-            # 冷藏费应付给仓库（目标方）
-            await add_account(order.target_id, order.id, "payable", storage_fee, f"入库冷藏费")
-            
-        elif order.order_type == "return_in":
-            # 客户退货：应付给客户
-            final = order.final_amount or Decimal("0")
-            await add_account(order.source_id, order.id, "payable", final, f"客户退货应退")
-            
-        elif order.order_type == "return_out":
-            # 退供应商：应收自供应商
-            final = order.final_amount or Decimal("0")
-            await add_account(order.target_id, order.id, "receivable", final, f"退供应商应收")
-    
-    # 更新所有实体的当前余额
-    for entity_id, balance in entity_balances.items():
-        entity = await db.get(Entity, entity_id)
-        if entity:
-            entity.current_balance = balance
-    
-    await db.commit()
-    return {
-        "success": True, 
-        "message": "账款重算完成", 
-        "orders_processed": len(orders), 
-        "accounts_created": account_count,
-        "entities_updated": len(entity_balances)
-    }
 
 
 @router.post("/upgrade-database")

@@ -35,8 +35,9 @@ class Category(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    # 关系
-    parent = relationship("Category", remote_side=[id], backref="children")
+    # 关系 - 自引用树形结构
+    parent = relationship("Category", remote_side=[id], back_populates="children")
+    children = relationship("Category", back_populates="parent", lazy="selectin")
     creator = relationship("User", foreign_keys=[created_by])
     products = relationship("Product", back_populates="category_rel")
     specifications = relationship("Specification", back_populates="category")

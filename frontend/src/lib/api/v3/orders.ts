@@ -90,9 +90,16 @@ export interface BusinessOrder {
   source_id: number;
   source_name: string;
   source_code: string;
+  source_type: string;
   target_id: number;
   target_name: string;
   target_code: string;
+  target_type: string;
+  logistics_company_id?: number;
+  logistics_company_name?: string;
+  logistics_company_code?: string;
+  business_type?: string;
+  business_type_display?: string;
   total_quantity: number;
   total_amount: number;
   total_shipping: number;
@@ -118,9 +125,8 @@ export interface OrderCreateData {
   order_type: string;
   source_id: number;
   target_id: number;
+  logistics_company_id?: number;
   order_date?: string;
-  loading_date?: string;
-  unloading_date?: string;
   total_discount?: number;
   total_shipping?: number;
   total_storage_fee?: number;
@@ -163,6 +169,9 @@ export interface OrderCreateData {
 }
 
 export const ORDER_TYPE_MAP: Record<string, { label: string; color: string }> = {
+  loading: { label: '装货单', color: 'bg-blue-100 text-blue-700' },
+  unloading: { label: '卸货单', color: 'bg-green-100 text-green-700' },
+  // 兼容旧类型显示
   purchase: { label: '采购', color: 'bg-blue-100 text-blue-700' },
   sale: { label: '销售', color: 'bg-green-100 text-green-700' },
   return_in: { label: '客户退货', color: 'bg-orange-100 text-orange-700' },

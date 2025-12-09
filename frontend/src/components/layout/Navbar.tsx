@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
   Building2, Package, FileText, Menu, X, Boxes, 
-  BarChart3, Settings, ChevronDown, Receipt, CreditCard, Database, 
+  Settings, ChevronDown, Receipt, CreditCard, Database, 
   Wallet, Home
 } from "lucide-react";
 
@@ -189,19 +189,6 @@ export function Navbar() {
               );
             })}
             
-            {/* 数据中心 - 独立链接 */}
-            <Link
-              href="/statistics"
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg transition-all ${
-                pathname.startsWith('/statistics')
-                  ? 'text-amber-700 bg-amber-50 font-medium'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              <BarChart3 className="h-4 w-4" />
-              数据中心
-            </Link>
-            
             {/* 系统设置下拉菜单 */}
             <div className="relative">
               <button
@@ -297,23 +284,6 @@ export function Navbar() {
                 </div>
               );
             })}
-            
-            {/* 移动端数据中心 */}
-            <Link
-              href="/statistics"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-3 py-3 rounded-lg mx-2 mt-2 border-t border-slate-100 ${
-                pathname.startsWith('/statistics')
-                  ? 'text-amber-700 bg-amber-50' 
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <BarChart3 className={`h-5 w-5 ${pathname.startsWith('/statistics') ? 'text-amber-600' : 'text-slate-400'}`} />
-              <div>
-                <div className="font-medium">数据中心</div>
-                <div className="text-xs text-slate-400">数据分析与报表</div>
-              </div>
-            </Link>
             
             {/* 移动端系统设置 */}
             <div className="px-3 py-2 mt-2 border-t border-slate-100">

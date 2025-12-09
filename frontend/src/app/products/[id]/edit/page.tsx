@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Package, Save, Plus, Trash2, Loader2, Check, X, Settings } from 'lucide-react';
+import { ArrowLeft, Package, Save, Plus, Trash2, Loader2, Check, X, Settings, FolderTree, Ruler, Scale, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -11,8 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { 
   productsApi, 
+  categoriesApi,
+  specificationsApi,
   unitsApi,
   Product,
+  Category,
+  CategoryTreeNode,
+  Specification,
+  UnitGroup,
   Unit
 } from '@/lib/api/v3';
 import { ProductSpec } from '@/lib/api/v3/products';
@@ -37,16 +43,25 @@ export default function EditProductPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
+  
+  // 基础数据
+  const [categoryTree, setCategoryTree] = useState<CategoryTreeNode[]>([]);
+  const [specifications, setSpecifications] = useState<Specification[]>([]);
+  const [unitGroups, setUnitGroups] = useState<UnitGroup[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   
-  // 基本信息表单
+  // 表单数据
   const [formData, setFormData] = useState({
     name: '',
+    category_id: '',
+    specification_id: '',
     specification: '',
-    unit: '',
-    category: '',
+    unit_id: '',
     description: ''
   });
+  
+  // 选中的分类路径
+  const [selectedCategoryPath, setSelectedCategoryPath] = useState<Category[]>([]);
   
   // 包装规格列表
   const [specs, setSpecs] = useState<SpecForm[]>([]);
@@ -64,24 +79,47 @@ export default function EditProductPage() {
     loadData();
   }, [productId]);
   
+  // 分类变化时加载对应规格
+  useEffect(() => {
+    if (formData.category_id) {
+      loadSpecifications(parseInt(formData.category_id));
+    }
+  }, [formData.category_id]);
+  
   const loadData = async () => {
     try {
       setLoading(true);
-      const [productData, unitsData] = await Promise.all([
+      const [productData, treeRes, groupsRes, unitsRes] = await Promise.all([
         productsApi.get(productId),
+        categoriesApi.tree(true),
+        unitsApi.listGroups(true),
         unitsApi.list({ is_active: true })
       ]);
       
       setProduct(productData);
-      setUnits(unitsData);
+      setCategoryTree(treeRes);
+      setUnitGroups(groupsRes.data);
+      setUnits(unitsRes);
       
+      // 设置表单数据
       setFormData({
         name: productData.name,
+        category_id: '', // 需要从分类树中查找
+        specification_id: '',
         specification: productData.specification || '',
-        unit: productData.unit,
-        category: productData.category || '',
+        unit_id: productData.unit_id?.toString() || '',
         description: productData.description || ''
       });
+      
+      // 根据分类名称查找分类ID和路径
+      if (productData.category) {
+        const categoryPath = findCategoryByName(treeRes, productData.category);
+        if (categoryPath.length > 0) {
+          const lastCategory = categoryPath[categoryPath.length - 1];
+          setFormData(prev => ({ ...prev, category_id: lastCategory.id.toString() }));
+          setSelectedCategoryPath(categoryPath);
+        }
+      }
       
       // 加载包装规格
       if (productData.specs) {
@@ -103,19 +141,62 @@ export default function EditProductPage() {
     }
   };
   
+  // 根据分类名称路径查找分类
+  const findCategoryByName = (nodes: CategoryTreeNode[], categoryName: string): Category[] => {
+    const parts = categoryName.split(' > ');
+    let currentNodes = nodes;
+    const path: Category[] = [];
+    
+    for (const part of parts) {
+      const found = currentNodes.find(n => n.name === part);
+      if (found) {
+        path.push(found);
+        currentNodes = found.children;
+      } else {
+        break;
+      }
+    }
+    return path;
+  };
+  
+  const loadSpecifications = async (categoryId: number) => {
+    try {
+      const res = await specificationsApi.list({ category_id: categoryId, is_active: true, limit: 100 });
+      setSpecifications(res.data);
+    } catch (err) {
+      console.error('Failed to load specifications:', err);
+    }
+  };
+  
+  const handleCategorySelect = (category: Category, path: Category[]) => {
+    setFormData({ ...formData, category_id: category.id.toString() });
+    setSelectedCategoryPath([...path, category]);
+  };
+  
   const handleSaveBasicInfo = async () => {
     if (!formData.name.trim()) {
       toast({ title: '请输入商品名称', variant: 'destructive' });
       return;
     }
     
+    if (!formData.unit_id) {
+      toast({ title: '请选择计量单位', variant: 'destructive' });
+      return;
+    }
+    
     setSaving(true);
     try {
+      const selectedUnit = units.find(u => u.id === parseInt(formData.unit_id));
+      const unitDisplay = selectedUnit?.name || '个';
+      
       await productsApi.update(productId, {
         name: formData.name.trim(),
-        specification: formData.specification || undefined,
-        unit: formData.unit,
-        category: formData.category || undefined,
+        category: selectedCategoryPath.length > 0 ? selectedCategoryPath.map(c => c.name).join(' > ') : undefined,
+        specification: formData.specification_id 
+          ? specifications.find(s => s.id === parseInt(formData.specification_id))?.name 
+          : formData.specification || undefined,
+        unit: unitDisplay,
+        unit_id: parseInt(formData.unit_id),
         description: formData.description || undefined
       });
       toast({ title: '保存成功' });
@@ -140,7 +221,6 @@ export default function EditProductPage() {
       return;
     }
     
-    // 如果是散装（数量=1且没填容器名），容器名使用基础单位符号
     const containerName = newSpec.container_name.trim() || getUnitSymbol(newSpec.unit_id);
     
     setSaving(true);
@@ -162,7 +242,7 @@ export default function EditProductPage() {
         is_default: false,
         isNew: true
       });
-      await loadData(); // 重新加载
+      await loadData();
     } catch (err: any) {
       toast({ title: '添加失败', description: err.message, variant: 'destructive' });
     } finally {
@@ -195,6 +275,40 @@ export default function EditProductPage() {
   const getUnitSymbol = (unitId: number) => {
     const unit = units.find(u => u.id === unitId);
     return unit?.symbol || '';
+  };
+  
+  // 递归渲染分类树
+  const renderCategoryTree = (nodes: CategoryTreeNode[], path: Category[] = [], level = 0) => {
+    return nodes.map(node => (
+      <div key={node.id} className={level > 0 ? 'ml-4' : ''}>
+        <div
+          onClick={() => handleCategorySelect(node, path)}
+          className={`
+            flex items-center justify-between p-2 rounded cursor-pointer transition-colors
+            ${formData.category_id === node.id.toString() 
+              ? 'bg-amber-100 text-amber-800' 
+              : 'hover:bg-paper-light'
+            }
+          `}
+        >
+          <div className="flex items-center gap-2">
+            <FolderTree className="w-4 h-4 text-ink-light" />
+            <span>{node.name}</span>
+            {node.products_count > 0 && (
+              <span className="text-xs text-ink-light">({node.products_count})</span>
+            )}
+          </div>
+          {node.children.length > 0 && (
+            <ChevronRight className="w-4 h-4 text-ink-light" />
+          )}
+        </div>
+        {node.children.length > 0 && (
+          <div className="border-l border-ink-light/30 ml-2">
+            {renderCategoryTree(node.children, [...path, node], level + 1)}
+          </div>
+        )}
+      </div>
+    ));
   };
   
   if (loading) {
@@ -233,78 +347,146 @@ export default function EditProductPage() {
           <div className="flex items-center gap-3">
             <Settings className="w-8 h-8 text-amber-600" />
             <div>
-              <h1 className="text-2xl font-bold text-ink-black">编辑商品</h1>
+              <h1 className="text-2xl font-bold text-ink-black">编辑商品信息</h1>
               <p className="text-sm text-ink-medium">{product.code} · {product.name}</p>
             </div>
           </div>
         </div>
         
         {/* 基本信息卡片 */}
-        <div className="card-base p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+        <div className="bg-paper-light border border-ink-light rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-ink-black mb-4 flex items-center gap-2">
             <Package className="w-5 h-5 text-amber-600" />
             基本信息
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="form-label">商品名称 *</label>
-              <Input 
-                value={formData.name} 
-                onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} 
-                placeholder="输入商品名称" 
-              />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-ink-dark mb-1">
+                  商品名称 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="请输入商品名称"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-dark mb-1">
+                  规格型号
+                </label>
+                <Input
+                  value={formData.specification}
+                  onChange={(e) => setFormData({ ...formData, specification: e.target.value, specification_id: '' })}
+                  placeholder="如：大号、500g"
+                />
+              </div>
             </div>
+            
             <div>
-              <label className="form-label">规格型号</label>
-              <Input 
-                value={formData.specification} 
-                onChange={e => setFormData(p => ({ ...p, specification: e.target.value }))} 
-                placeholder="如：大号、500g" 
-              />
-            </div>
-            <div>
-              <label className="form-label">计量单位</label>
-              <Input 
-                value={formData.unit} 
-                onChange={e => setFormData(p => ({ ...p, unit: e.target.value }))} 
-                placeholder="如：kg、个" 
-              />
-            </div>
-            <div>
-              <label className="form-label">分类</label>
-              <Input 
-                value={formData.category} 
-                onChange={e => setFormData(p => ({ ...p, category: e.target.value }))} 
-                placeholder="商品分类" 
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="form-label">描述</label>
-              <Textarea 
-                value={formData.description} 
-                onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} 
-                placeholder="商品描述（可选）" 
+              <label className="block text-sm font-medium text-ink-dark mb-1">
+                商品描述
+              </label>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="商品描述（可选）"
                 rows={2}
               />
             </div>
           </div>
+        </div>
+        
+        {/* 分类选择 */}
+        <div className="bg-paper-light border border-ink-light rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-ink-black mb-4 flex items-center gap-2">
+            <FolderTree className="w-5 h-5" />
+            商品分类
+          </h2>
           
-          <div className="flex justify-end mt-4">
-            <Button onClick={handleSaveBasicInfo} disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              保存基本信息
-            </Button>
+          {selectedCategoryPath.length > 0 && (
+            <div className="mb-4 flex items-center gap-2 text-sm">
+              <span className="text-ink-light">已选：</span>
+              {selectedCategoryPath.map((c, i) => (
+                <React.Fragment key={c.id}>
+                  {i > 0 && <ChevronRight className="w-3 h-3 text-ink-light" />}
+                  <span className="text-amber-600">{c.name}</span>
+                </React.Fragment>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, category_id: '' });
+                  setSelectedCategoryPath([]);
+                }}
+                className="ml-2 text-xs text-ink-light hover:text-red-500"
+              >
+                清除
+              </button>
+            </div>
+          )}
+          
+          <div className="border border-ink-light/50 rounded-lg p-4 max-h-48 overflow-y-auto bg-white">
+            {categoryTree.length > 0 ? (
+              renderCategoryTree(categoryTree)
+            ) : (
+              <div className="text-center text-ink-light py-4">
+                <FolderTree className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p>暂无分类</p>
+              </div>
+            )}
           </div>
         </div>
         
+        {/* 单位选择 */}
+        <div className="bg-paper-light border border-ink-light rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-ink-black mb-4 flex items-center gap-2">
+            <Scale className="w-5 h-5" />
+            计量单位 <span className="text-red-500">*</span>
+          </h2>
+          
+          <Select
+            value={formData.unit_id || 'none'}
+            onValueChange={(value) => setFormData({ ...formData, unit_id: value === 'none' ? '' : value })}
+          >
+            <SelectTrigger className="max-w-md">
+              <SelectValue placeholder="请选择计量单位..." />
+            </SelectTrigger>
+            <SelectContent>
+              {unitGroups.map(group => (
+                <React.Fragment key={group.id}>
+                  <div className="px-2 py-1 text-xs font-semibold text-ink-light bg-paper-light">
+                    {group.name}
+                  </div>
+                  {group.units.map(unit => (
+                    <SelectItem key={unit.id} value={unit.id.toString()}>
+                      {unit.name} ({unit.symbol})
+                      {unit.is_base && <span className="ml-1 text-xs text-amber-600">基准</span>}
+                      {!unit.is_base && <span className="ml-1 text-xs text-ink-light">= {unit.conversion_rate} {group.base_unit}</span>}
+                    </SelectItem>
+                  ))}
+                </React.Fragment>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        
+        {/* 保存基本信息按钮 */}
+        <div className="flex justify-end mb-6">
+          <Button onClick={handleSaveBasicInfo} disabled={saving} className="bg-amber-600 hover:bg-amber-700">
+            {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            保存基本信息
+          </Button>
+        </div>
+        
         {/* 包装规格卡片 */}
-        <div className="card-base p-6">
+        <div className="bg-paper-light border border-ink-light rounded-lg p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-ink-black flex items-center gap-2">
               <Package className="w-5 h-5 text-blue-600" />
               包装规格
-              <span className="text-sm font-normal text-slate-500">
+              <span className="text-sm font-normal text-ink-medium">
                 （用于按件计价和重量换算）
               </span>
             </h2>
@@ -443,7 +625,7 @@ export default function EditProductPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-400">
+            <div className="text-center py-8 text-ink-light">
               <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
               <p>暂无包装规格</p>
               <p className="text-xs mt-1">添加包装规格后，采购时可按件计价并自动换算重量</p>
@@ -464,4 +646,3 @@ export default function EditProductPage() {
     </div>
   );
 }
-

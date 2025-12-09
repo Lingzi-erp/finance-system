@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Package, Search, AlertTriangle, ArrowUpDown, Building2, RefreshCw, ChevronDown, ChevronUp, History, Boxes, Tag } from 'lucide-react';
+import Link from 'next/link';
+import { Package, Search, AlertTriangle, ArrowUpDown, Building2, RefreshCw, ChevronDown, ChevronUp, History, Boxes, Tag, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -241,6 +242,73 @@ export default function StocksPage() {
     } finally {
       setRevertingFlowId(null);
     }
+  };
+  
+  // 渲染带链接的原因（订单号和批次号可点击）
+  const renderReason = (flow: StockFlow) => {
+    if (!flow.reason) return <span className="text-slate-400">-</span>;
+    
+    let reason = flow.reason;
+    const elements: React.ReactNode[] = [];
+    let lastIndex = 0;
+    
+    // 提取订单号（PO/SO/RI/RO开头，后跟数字或日期格式）
+    const orderNoMatch = reason.match(/\b(PO|SO|RI|RO)\d{8,}(?:-\d+)?/);
+    if (orderNoMatch && flow.order_id) {
+      const orderNo = orderNoMatch[0];
+      const idx = reason.indexOf(orderNo);
+      if (idx > lastIndex) {
+        elements.push(<span key={`text-${lastIndex}`}>{reason.slice(lastIndex, idx)}</span>);
+      }
+      elements.push(
+        <Link 
+          key={`order-${flow.id}`}
+          href={`/orders/${flow.order_id}`}
+          className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+        >
+          {orderNo}
+        </Link>
+      );
+      lastIndex = idx + orderNo.length;
+    }
+    
+    // 提取批次号（批次:XXX 或 PH开头）
+    const batchMatch = reason.match(/批次[:：]?\s*([A-Z]{2}\d{8,}(?:-\d+)?)/);
+    if (batchMatch) {
+      const fullMatch = batchMatch[0];
+      const batchNo = batchMatch[1];
+      const idx = reason.indexOf(fullMatch, lastIndex);
+      if (idx >= lastIndex) {
+        if (idx > lastIndex) {
+          elements.push(<span key={`text2-${lastIndex}`}>{reason.slice(lastIndex, idx)}</span>);
+        }
+        // 批次号链接到批次列表页并带上搜索参数
+        elements.push(
+          <span key={`batch-${flow.id}`}>
+            批次:
+            <Link 
+              href={`/batches?search=${encodeURIComponent(batchNo)}`}
+              className="text-green-600 hover:text-green-800 hover:underline font-medium"
+            >
+              {batchNo}
+            </Link>
+          </span>
+        );
+        lastIndex = idx + fullMatch.length;
+      }
+    }
+    
+    // 添加剩余文本
+    if (lastIndex < reason.length) {
+      elements.push(<span key={`text-end`}>{reason.slice(lastIndex)}</span>);
+    }
+    
+    // 如果没有提取到任何链接，直接返回原文
+    if (elements.length === 0) {
+      return <span>{reason}</span>;
+    }
+    
+    return <>{elements}</>;
   };
   
   // 刷新库存（自动重算）
@@ -535,7 +603,7 @@ export default function StocksPage() {
                                           {flow.quantity_change > 0 ? '+' : ''}{flow.quantity_change}
                                         </td>
                                           <td className="py-2 px-2 text-right font-mono text-slate-900">{flow.quantity_after}</td>
-                                          <td className="py-2 px-2 text-slate-600">{flow.reason || '-'}</td>
+                                          <td className="py-2 px-2 text-slate-600">{renderReason(flow)}</td>
                                           <td className="py-2 px-2 text-slate-500">{flow.operator_name}</td>
                                         <td className="py-2 px-2 text-center">
                                           {flow.can_revert && (

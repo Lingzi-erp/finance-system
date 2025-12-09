@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 import { entitiesApi, Entity } from '@/lib/api/v3';
-import { Building2, Plus, Search, Edit, Trash2, X, Warehouse, Users, Truck } from 'lucide-react';
+import { Building2, Plus, Search, Edit, Trash2, X, Warehouse, Users, Truck, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -98,6 +98,7 @@ export default function EntitiesPage() {
   };
 
   const getEntityIcon = (type: string) => {
+    if (type.includes('transit')) return <Navigation className="w-5 h-5 text-amber-600" />;
     if (type.includes('warehouse')) return <Warehouse className="w-5 h-5 text-blue-600" />;
     if (type.includes('logistics')) return <Truck className="w-5 h-5 text-purple-600" />;
     if (type.includes('supplier')) return <Truck className="w-5 h-5 text-orange-600" />;
@@ -107,14 +108,17 @@ export default function EntitiesPage() {
 
   const getTypeLabel = (type: string) => {
     const labels: string[] = [];
-    if (type.includes('warehouse')) labels.push('仓库');
+    if (type.includes('transit')) labels.push('在途仓');
+    else if (type.includes('warehouse')) labels.push('仓库');
     if (type.includes('logistics')) labels.push('物流');
     if (type.includes('supplier')) labels.push('供应商');
     if (type.includes('customer')) labels.push('客户');
+    if (type.includes('other')) labels.push('其他');
     return labels.join('/') || type;
   };
 
   const getTypeColor = (type: string) => {
+    if (type.includes('transit')) return 'bg-amber-50 text-amber-700 border-amber-200';
     if (type.includes('warehouse')) return 'bg-blue-50 text-blue-700 border-blue-200';
     if (type.includes('logistics')) return 'bg-purple-50 text-purple-700 border-purple-200';
     if (type.includes('supplier')) return 'bg-orange-50 text-orange-700 border-orange-200';
@@ -221,6 +225,7 @@ export default function EntitiesPage() {
                   <SelectItem value="supplier">供应商</SelectItem>
                   <SelectItem value="customer">客户</SelectItem>
                   <SelectItem value="logistics">物流公司</SelectItem>
+                  <SelectItem value="transit">在途仓</SelectItem>
                 </SelectContent>
               </Select>
             </div>

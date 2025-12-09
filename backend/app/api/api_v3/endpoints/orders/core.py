@@ -25,6 +25,10 @@ from app.schemas.v3.business_order import (
 async def generate_order_no(db: AsyncSession, order_type: str) -> str:
     """生成业务单号"""
     prefix_map = {
+        # 新架构单据类型
+        "loading": "ZH",      # 装货单
+        "unloading": "XH",    # 卸货单
+        # 兼容旧类型
         "purchase": "PO",
         "sale": "SO",
         "transfer": "TO",
@@ -68,15 +72,22 @@ def build_order_response(order: BusinessOrder) -> BusinessOrderResponse:
         status=order.status,
         source_id=order.source_id,
         target_id=order.target_id,
+        logistics_company_id=order.logistics_company_id,
         order_date=order.order_date,
         total_discount=float(order.total_discount or 0),
         notes=order.notes,
         type_display=order.type_display,
         status_display=order.status_display,
+        business_type=order.business_type if hasattr(order, 'business_type') else "",
+        business_type_display=order.business_type_display if hasattr(order, 'business_type_display') else "",
         source_name=order.source_entity.name if order.source_entity else "",
         source_code=order.source_entity.code if order.source_entity else "",
+        source_type=order.source_entity.entity_type if order.source_entity else "",
         target_name=order.target_entity.name if order.target_entity else "",
         target_code=order.target_entity.code if order.target_entity else "",
+        target_type=order.target_entity.entity_type if order.target_entity else "",
+        logistics_company_name=order.logistics_company.name if order.logistics_company else "",
+        logistics_company_code=order.logistics_company.code if order.logistics_company else "",
         total_quantity=order.total_quantity or 0,
         total_amount=float(order.total_amount or 0),
         total_shipping=float(order.total_shipping or 0),
@@ -202,6 +213,7 @@ def base_order_query():
     return select(BusinessOrder).options(
         selectinload(BusinessOrder.source_entity),
         selectinload(BusinessOrder.target_entity),
+        selectinload(BusinessOrder.logistics_company),  # 物流公司
         selectinload(BusinessOrder.related_order),
         selectinload(BusinessOrder.return_orders),
         selectinload(BusinessOrder.items).selectinload(OrderItem.product),

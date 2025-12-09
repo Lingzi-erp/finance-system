@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { 
   Package, Search, Plus, RefreshCw, 
   ChevronDown, ChevronUp, Warehouse, Truck, 
-  Clock, DollarSign, Scale, X
+  Clock, DollarSign, Scale, X, RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,7 @@ import {
   batchesApi, deductionFormulasApi, 
   StockBatch, DeductionFormula, BATCH_STATUS_MAP,
   entitiesApi, Entity, productsApi, Product,
-  OutboundRecord
+  OutboundRecord, ReturnRecord
 } from '@/lib/api/v3';
 
 // 解析复式单位信息（如 "箱(20kg)" -> { container: "箱", quantity: 20, unit: "kg" }）
@@ -63,6 +63,7 @@ export default function BatchesPage() {
   // 展开详情
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [outboundRecords, setOutboundRecords] = useState<OutboundRecord[]>([]);
+  const [returnRecords, setReturnRecords] = useState<ReturnRecord[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   
   // 新建批次对话框
@@ -102,28 +103,34 @@ export default function BatchesPage() {
   
   
   
-  // 加载出库记录
-  const loadOutboundRecords = async (batchId: number) => {
+  // 加载批次记录（出库+退货）
+  const loadBatchRecords = async (batchId: number) => {
     setLoadingRecords(true);
     try {
-      const records = await batchesApi.getOutboundRecords(batchId);
-      setOutboundRecords(records);
+      const [outbound, returns] = await Promise.all([
+        batchesApi.getOutboundRecords(batchId),
+        batchesApi.getReturnRecords(batchId)
+      ]);
+      setOutboundRecords(outbound);
+      setReturnRecords(returns);
     } catch (err) {
-      console.error('Failed to load outbound records:', err);
+      console.error('Failed to load batch records:', err);
       setOutboundRecords([]);
+      setReturnRecords([]);
     } finally {
       setLoadingRecords(false);
     }
   };
   
-  // 展开批次时加载出库记录
+  // 展开批次时加载记录
   const handleExpandBatch = (batchId: number) => {
     if (expandedId === batchId) {
       setExpandedId(null);
       setOutboundRecords([]);
+      setReturnRecords([]);
     } else {
       setExpandedId(batchId);
-      loadOutboundRecords(batchId);
+      loadBatchRecords(batchId);
     }
   };
   
@@ -681,6 +688,69 @@ export default function BatchesPage() {
                                   </div>
                                 )}
                               </div>
+                              
+                              {/* 退货记录 */}
+                              {returnRecords.length > 0 && (
+                                <div className="mt-6">
+                                  <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-3">
+                                    <RotateCcw className="w-4 h-4 text-orange-500" />
+                                    <span className="text-orange-600">退货记录</span>
+                                  </h4>
+                                  
+                                  <div className="bg-orange-50/50 rounded-lg border border-orange-100 overflow-hidden">
+                                    <table className="w-full text-sm">
+                                      <thead className="bg-orange-100/50">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left text-slate-600">退货单</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">类型</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">对方</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">日期</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">数量</th>
+                                          <th className="px-3 py-2 text-right text-slate-600">金额</th>
+                                          <th className="px-3 py-2 text-left text-slate-600">原因</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {returnRecords.map((record) => (
+                                          <tr key={record.id} className="border-t border-orange-100">
+                                            <td className="px-3 py-2">
+                                              <a 
+                                                href={`/orders/${record.order_id}`}
+                                                className="text-amber-600 hover:text-amber-700 hover:underline font-medium"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                {record.order_no}
+                                              </a>
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <span className={`badge ${
+                                                record.order_type === 'return_in' ? 'badge-success' : 'badge-warning'
+                                              }`}>
+                                                {record.order_type_display}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-700">{record.entity_name}</td>
+                                            <td className="px-3 py-2 text-slate-600">
+                                              {record.order_date ? new Date(record.order_date).toLocaleDateString('zh-CN') : '-'}
+                                            </td>
+                                            <td className={`px-3 py-2 text-right font-mono ${
+                                              record.order_type === 'return_in' ? 'text-green-600' : 'text-red-500'
+                                            }`}>
+                                              {record.order_type === 'return_in' ? '+' : '-'}{formatNumber(record.quantity)}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                              {record.amount ? formatCurrency(record.amount) : '-'}
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500 text-xs">
+                                              {record.reason || '-'}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
                               
                               {/* 备注 */}
                               {batch.notes && !batch.notes.startsWith('补充生成') && (

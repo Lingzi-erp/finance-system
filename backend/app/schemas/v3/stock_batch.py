@@ -275,3 +275,34 @@ class BatchTraceRecord(BaseModel):
     operator_name: str = ""
     notes: Optional[str] = None
 
+
+class ReturnItemBatchResponse(BaseModel):
+    """退货记录响应（批次追溯 - 退货记录）"""
+    id: int
+    order_item_id: int
+    source_batch_id: Optional[int] = None
+    target_batch_id: Optional[int] = None
+    quantity: Decimal
+    amount: Optional[Decimal] = None
+    storage_fee: Optional[Decimal] = None
+    other_fee: Optional[Decimal] = None
+    reason: Optional[str] = None
+    created_at: datetime
+    
+    # 退货单信息
+    order_id: Optional[int] = None
+    order_no: str = ""
+    order_type: str = ""  # return_in 或 return_out
+    order_type_display: str = ""
+    order_date: Optional[datetime] = None
+    
+    # 实体信息
+    entity_id: Optional[int] = None
+    entity_name: str = ""  # 客户(return_in)或供应商(return_out)
+    
+    # 批次信息
+    batch_no: str = ""
+
+    class Config:
+        from_attributes = True
+

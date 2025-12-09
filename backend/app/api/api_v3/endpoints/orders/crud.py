@@ -103,11 +103,22 @@ async def create_order(
     
     order_no = await generate_order_no(db, order_in.order_type)
     
+    # 验证物流公司（如果提供了）
+    if order_in.logistics_company_id:
+        logistics = await db.get(Entity, order_in.logistics_company_id)
+        if not logistics or not logistics.is_logistics:
+            raise HTTPException(status_code=400, detail="物流公司不存在或类型不正确")
+    
     # 业务日期根据订单类型自动设置：
-    # - 采购单：卸货日期（入库日期）
-    # - 销售单：装货日期（出库日期）
-    # - 其他：优先使用卸货日期，否则装货日期
-    if order_in.order_type == "purchase":
+    # - loading(装货单)：使用order_date作为装货日期
+    # - unloading(卸货单)：使用order_date作为卸货日期
+    # - purchase(旧类型)：卸货日期（入库日期）
+    # - sale(旧类型)：装货日期（出库日期）
+    if order_in.order_type == "loading":
+        business_date = order_in.order_date or datetime.utcnow()
+    elif order_in.order_type == "unloading":
+        business_date = order_in.order_date or datetime.utcnow()
+    elif order_in.order_type == "purchase":
         business_date = order_in.unloading_date or order_in.order_date or datetime.utcnow()
     elif order_in.order_type == "sale":
         business_date = order_in.loading_date or order_in.order_date or datetime.utcnow()
@@ -120,6 +131,7 @@ async def create_order(
         status="draft",
         source_id=order_in.source_id,
         target_id=order_in.target_id,
+        logistics_company_id=order_in.logistics_company_id,
         order_date=business_date,
         loading_date=order_in.loading_date,
         unloading_date=order_in.unloading_date,
@@ -240,6 +252,14 @@ async def update_order(
             if not target:
                 raise HTTPException(status_code=400, detail="目标实体不存在")
             order.target_id = order_in.target_id
+        if order_in.logistics_company_id is not None:
+            if order_in.logistics_company_id > 0:
+                logistics = await db.get(Entity, order_in.logistics_company_id)
+                if not logistics or not logistics.is_logistics:
+                    raise HTTPException(status_code=400, detail="物流公司不存在或类型不正确")
+                order.logistics_company_id = order_in.logistics_company_id
+            else:
+                order.logistics_company_id = None
         if order_in.order_date is not None:
             order.order_date = order_in.order_date
         if order_in.loading_date is not None:

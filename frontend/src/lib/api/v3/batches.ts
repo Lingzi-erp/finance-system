@@ -276,6 +276,14 @@ export const batchesApi = {
     });
     return handleResponse(res);
   },
+  
+  // 获取批次退货记录
+  getReturnRecords: async (batchId: number): Promise<ReturnRecord[]> => {
+    const res = await fetch(`${API_BASE}/batches/${batchId}/return-records`, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse(res);
+  },
 };
 
 // 出库记录类型
@@ -301,6 +309,31 @@ export interface OutboundRecord {
   sale_price: number | null;
   sale_amount: number | null;
   profit: number | null;
+}
+
+// 退货记录类型
+export interface ReturnRecord {
+  id: number;
+  order_item_id: number;
+  source_batch_id: number | null;
+  target_batch_id: number | null;
+  quantity: number;
+  amount: number | null;
+  storage_fee: number | null;
+  other_fee: number | null;
+  reason: string | null;
+  created_at: string;
+  // 退货单信息
+  order_id: number | null;
+  order_no: string;
+  order_type: string;  // return_in 或 return_out
+  order_type_display: string;
+  order_date: string | null;
+  // 实体信息
+  entity_id: number | null;
+  entity_name: string;
+  // 批次信息
+  batch_no: string;
 }
 
 // 扣重公式 API

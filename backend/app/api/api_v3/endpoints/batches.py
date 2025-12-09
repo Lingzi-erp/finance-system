@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
-from app.models.v3.stock_batch import StockBatch, OrderItemBatch
+from app.models.v3.stock_batch import StockBatch, OrderItemBatch, ReturnItemBatch
 from app.models.v3.deduction_formula import DeductionFormula
 from app.models.v3.entity import Entity
 from app.models.v3.product import Product
@@ -18,7 +18,7 @@ from app.models.v3.order_item import OrderItem
 from app.schemas.v3.stock_batch import (
     StockBatchCreate, StockBatchUpdate, StockBatchAdjust,
     StockBatchResponse, StockBatchListResponse, StockBatchSimple,
-    OrderItemBatchResponse,
+    OrderItemBatchResponse, ReturnItemBatchResponse,
     InitialBatchImport,
     BatchSummaryByProduct, BatchSummaryByStorage,
     BatchTraceRecord)
@@ -594,6 +594,83 @@ async def get_batch_outbound_records(
         )
         for r in records
     ]
+
+
+@router.get("/{batch_id}/return-records", response_model=List[ReturnItemBatchResponse])
+async def get_batch_return_records(
+    *,
+    db: AsyncSession = Depends(get_db),
+    batch_id: int) -> Any:
+    """获取批次的退货记录
+    
+    包括：
+    - return_in（客户退货入库）：target_batch_id == batch_id
+    - return_out（退给供应商）：source_batch_id == batch_id
+    """
+    batch = await db.get(StockBatch, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    
+    # 查询涉及此批次的退货记录（入库或出库）
+    result = await db.execute(
+        select(ReturnItemBatch).options(
+            selectinload(ReturnItemBatch.order_item).selectinload(OrderItem.order).selectinload(BusinessOrder.source_entity),
+            selectinload(ReturnItemBatch.order_item).selectinload(OrderItem.order).selectinload(BusinessOrder.target_entity),
+            selectinload(ReturnItemBatch.source_batch),
+            selectinload(ReturnItemBatch.target_batch)
+        ).where(
+            or_(
+                ReturnItemBatch.source_batch_id == batch_id,
+                ReturnItemBatch.target_batch_id == batch_id
+            )
+        ).order_by(ReturnItemBatch.created_at.desc())
+    )
+    records = result.scalars().all()
+    
+    order_type_map = {
+        "return_in": "客户退货",
+        "return_out": "退供应商",
+    }
+    
+    # 过滤掉关联的 OrderItem 或 Order 已被删除的孤儿记录
+    valid_records = [r for r in records if r.order_item and r.order_item.order]
+    
+    return [
+        ReturnItemBatchResponse(
+            id=r.id,
+            order_item_id=r.order_item_id,
+            source_batch_id=r.source_batch_id,
+            target_batch_id=r.target_batch_id,
+            quantity=r.quantity,
+            amount=r.amount,
+            storage_fee=r.storage_fee,
+            other_fee=r.other_fee,
+            reason=r.reason,
+            created_at=r.created_at,
+            # 退货单信息
+            order_id=r.order_item.order.id,
+            order_no=r.order_item.order.order_no,
+            order_type=r.order_item.order.order_type,
+            order_type_display=order_type_map.get(r.order_item.order.order_type, ""),
+            order_date=r.order_item.order.unloading_date or r.order_item.order.loading_date,
+            # 实体信息：return_in 时是来源(客户)，return_out 时是目标(供应商)
+            entity_id=(
+                r.order_item.order.source_id if r.order_item.order.order_type == "return_in"
+                else r.order_item.order.target_id
+            ),
+            entity_name=(
+                r.order_item.order.source_entity.name if r.order_item.order.order_type == "return_in" and r.order_item.order.source_entity
+                else (r.order_item.order.target_entity.name if r.order_item.order.target_entity else "")
+            ),
+            # 批次信息
+            batch_no=(
+                r.source_batch.batch_no if r.source_batch_id == batch_id and r.source_batch 
+                else (r.target_batch.batch_no if r.target_batch else "")
+            )
+        )
+        for r in valid_records
+    ]
+
 
 # ===== 统计汇总 =====
 

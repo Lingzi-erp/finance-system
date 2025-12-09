@@ -43,6 +43,12 @@ const SelectContent = React.forwardRef<
         className
       )}
       position={position}
+      // 修复 Electron 环境下焦点问题：
+      // 1. 阻止关闭后自动聚焦（避免焦点跳转问题）
+      // 2. 不阻止 onPointerDownOutside，让点击外部能正常关闭下拉框
+      onCloseAutoFocus={(e) => {
+        e.preventDefault();
+      }}
       {...props}
     >
       <SelectPrimitive.Viewport
